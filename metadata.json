@@ -1,0 +1,6 @@
+{
+  "name": "LibTrack – BVC Library",
+  "description": "BVC College of Engineering smart library management platform featuring student and librarian portals, roll-number based book requests, real-time inventory, fine tracking, and automated circulation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
