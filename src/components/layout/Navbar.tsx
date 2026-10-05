@@ -16,7 +16,9 @@ import {
   Menu,
   X,
   ExternalLink,
+  Clock,
 } from 'lucide-react';
+import { getISTDetails } from '../../utils/sessionUtils';
 
 interface NavbarProps {
   onToggleSidebar?: () => void;
@@ -25,7 +27,7 @@ interface NavbarProps {
 
 export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
   const { currentUser, logout } = useAuth();
-  const { notifications, markNotificationAsRead, markAllNotificationsAsRead, systemDate } = useLibrary();
+  const { notifications, markNotificationAsRead, markAllNotificationsAsRead, systemDate, sessionInfo } = useLibrary();
   const navigate = useNavigate();
 
   const [showNotifications, setShowNotifications] = useState(false);
@@ -131,6 +133,20 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
 
           {/* Right: Notifications & User Profile */}
           <div className="flex items-center gap-2 sm:gap-3">
+
+            {/* Live IST Session Indicator */}
+            <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-xl border bg-slate-50 border-slate-200/80 text-xs">
+              <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${sessionInfo.isActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+              <div className="flex flex-col text-left leading-tight">
+                <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                  <span>{sessionInfo.session === 'Closed' ? 'Session Closed' : `${sessionInfo.session} Session`}</span>
+                  <span className="font-mono text-[10px] text-slate-500 font-semibold">{getISTDetails(systemDate).time12} IST</span>
+                </div>
+                <span className="text-[10px] text-slate-500 font-medium">
+                  {sessionInfo.isActive ? `Closes at ${sessionInfo.closesAtText}` : sessionInfo.nextSessionText}
+                </span>
+              </div>
+            </div>
             
             {/* Notification Bell */}
             <div className="relative" ref={notifRef}>

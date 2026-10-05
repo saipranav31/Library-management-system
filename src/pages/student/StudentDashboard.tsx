@@ -15,7 +15,9 @@ import {
   RefreshCw,
   AlertCircle,
   BookmarkCheck,
+  Sparkles,
 } from 'lucide-react';
+import { getISTDetails } from '../../utils/sessionUtils';
 
 export const StudentDashboard: React.FC = () => {
   const { currentUser } = useAuth();
@@ -25,19 +27,25 @@ export const StudentDashboard: React.FC = () => {
     borrowings,
     fines,
     systemDate,
+    sessionInfo,
     requestRenewal,
   } = useLibrary();
 
   if (!currentUser) return null;
 
+  const ist = getISTDetails(systemDate);
+
   // Student specific data
   const myBorrowings = borrowings.filter(
     b => (b.studentId === currentUser.studentId || b.studentEmail === currentUser.email) && b.status !== 'returned'
   );
+  const myRecalledLoans = myBorrowings.filter(b => b.immediateReturnRequested);
+
   const myRequests = requests.filter(
     r => r.studentId === currentUser.studentId || r.studentRollNo === currentUser.studentId || r.studentEmail === currentUser.email
   );
-  const myPendingRequests = myRequests.filter(r => ['Pending', 'Approved'].includes(r.status));
+  const myGrantedRequests = myRequests.filter(r => r.status === 'Granted' || r.status === 'Approved');
+  const myPendingRequests = myRequests.filter(r => ['Pending', 'Approved', 'Granted', 'Waitlisted'].includes(r.status));
 
   // Overdue calculation (strictly ₹2 per day)
   const myOverdue = myBorrowings.filter(b => {
@@ -126,6 +134,97 @@ export const StudentDashboard: React.FC = () => {
         {/* Ambient background decoration */}
         <div className="absolute -right-10 -bottom-10 w-48 h-48 bg-blue-600/10 rounded-full blur-2xl pointer-events-none" />
       </div>
+
+      {/* Library Request Session Status Bar */}
+      <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className={`w-3 h-3 rounded-full ${sessionInfo.isActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-extrabold text-sm text-slate-900">
+                {sessionInfo.statusText}
+              </span>
+              <span className="font-mono text-xs px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-bold">
+                {ist.time12} IST
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Sessions: <strong className="text-slate-700">Morning (9:30 AM – 12:30 PM)</strong> &bull; <strong className="text-slate-700">Afternoon (1:30 PM – 4:30 PM)</strong>
+            </p>
+          </div>
+        </div>
+
+        <div className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 self-start sm:self-auto">
+          {sessionInfo.isActive ? `Closes at ${sessionInfo.closesAtText}` : sessionInfo.nextSessionText}
+        </div>
+      </div>
+
+      {/* Urgent Recall Alert (CHANGE 5) */}
+      {myRecalledLoans.length > 0 && (
+        <div className="space-y-2">
+          {myRecalledLoans.map(loan => (
+            <div
+              key={loan.id}
+              className="bg-rose-50 border-2 border-rose-400 rounded-2xl p-4 text-rose-950 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs"
+            >
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="bg-rose-700 text-white text-[10px] font-black uppercase px-2 py-0.5 rounded-md tracking-wider animate-pulse">
+                    URGENT LIBRARY NOTICE
+                  </span>
+                  <span className="font-extrabold text-sm text-rose-900">
+                    The librarian has requested immediate return of "{loan.bookTitle}"
+                  </span>
+                </div>
+                <p className="text-xs text-rose-800">
+                  <strong className="text-rose-950">Message from Librarian:</strong> {loan.immediateReturnMessage || 'Please return this book to the library immediately because it is required by another student.'}
+                </p>
+              </div>
+              <Link
+                to="/student/borrowed"
+                className="px-3.5 py-1.5 bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold rounded-xl shrink-0 transition"
+              >
+                View Borrowed Book
+              </Link>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Granted Requests Pickup Alert (CHANGE 3) */}
+      {myGrantedRequests.length > 0 && (
+        <div className="space-y-2">
+          {myGrantedRequests.map(req => (
+            <div
+              key={req.id}
+              className="bg-emerald-50 border-2 border-emerald-400 rounded-2xl p-4 text-emerald-950 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs"
+            >
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="bg-emerald-700 text-white text-[10px] font-black uppercase px-2 py-0.5 rounded-md tracking-wider">
+                    BOOK REQUEST GRANTED
+                  </span>
+                  <span className="font-extrabold text-sm text-emerald-900">
+                    "{req.bookTitle}" is ready for physical pickup!
+                  </span>
+                </div>
+                <p className="text-xs text-emerald-800">
+                  Request ID: <strong className="font-mono">{req.requestId}</strong> &bull; Session: <strong>{req.session || 'Morning'}</strong> &bull; Pickup deadline: <strong>{req.pickupDeadline || (req.session === 'Afternoon' ? '4:30 PM' : '12:30 PM')}</strong>.
+                  <span className="block text-[11px] text-emerald-700 mt-0.5">
+                    Present your roll number (<span className="font-mono font-bold">{currentUser.studentId}</span>) at the circulation desk before the deadline to collect. Requests expire automatically at session end.
+                  </span>
+                </p>
+              </div>
+              <Link
+                to="/student/requests"
+                className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl shrink-0 transition"
+              >
+                View Request Pass
+              </Link>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* ============================================================ */}
       {/* SECTION 14: STUDENT OVERDUE & FINE DISPLAY */}

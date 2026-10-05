@@ -1,7 +1,19 @@
-import { Book, User, BookRequest, Borrowing, AppNotification, Fine, WaitlistEntry, Complaint, LostDamagedReport, AuditLog, LibrarySettings } from '../types';
+import {
+  Book,
+  User,
+  BookRequest,
+  Borrowing,
+  AppNotification,
+  Fine,
+  WaitlistEntry,
+  Complaint,
+  LostDamagedReport,
+  AuditLog,
+  LibrarySettings,
+} from '../types';
 
 export const INITIAL_SETTINGS: LibrarySettings = {
-  loanPeriodDays: 15,
+  loanPeriodDays: 14,
   finePerDay: 2, // College library fine is exactly ₹2 per day after the due date
   maxFine: 500,
   gracePeriodDays: 0,
@@ -9,9 +21,16 @@ export const INITIAL_SETTINGS: LibrarySettings = {
   lowStockThreshold: 2,
   collegeName: 'BVC College of Engineering',
   libraryCode: 'LIB-BVC',
+  currentAcademicYear: '2026-2027',
+  academicYearStart: 'June 1',
+  academicYearEnd: 'May 31',
+  morningSessionStart: '09:30',
+  morningSessionEnd: '12:30',
+  afternoonSessionStart: '13:30',
+  afternoonSessionEnd: '16:30',
 };
 
-// Initial institutional account for BVC Library administration
+// Initial institutional staff account for BVC College of Engineering
 export const INITIAL_USERS: User[] = [
   {
     id: 'usr-librarian-1',
@@ -26,13 +45,21 @@ export const INITIAL_USERS: User[] = [
   },
 ];
 
-// All initial collections start 100% EMPTY.
-// The librarian and registered students will create real records.
+// Real catalog starts empty until the librarian adds real books
 export const INITIAL_BOOKS: Book[] = [];
+
+// Real circulation requests start empty
 export const INITIAL_REQUESTS: BookRequest[] = [];
+
+// Real borrowing transactions start empty
 export const INITIAL_BORROWINGS: Borrowing[] = [];
+
+// Real user notifications start empty
 export const INITIAL_NOTIFICATIONS: AppNotification[] = [];
+
+// Real fines start empty
 export const INITIAL_FINES: Fine[] = [];
+
 export const INITIAL_WAITLIST: WaitlistEntry[] = [];
 export const INITIAL_COMPLAINTS: Complaint[] = [];
 export const INITIAL_LOST_DAMAGED: LostDamagedReport[] = [];

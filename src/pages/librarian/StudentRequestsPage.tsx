@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { useLibrary } from '../../context/LibraryContext';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -16,9 +17,11 @@ import {
   AlertCircle,
   Eye,
   BookmarkCheck,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { Modal } from '../../components/common/Modal';
 import { BookRequest } from '../../types';
+import { formatISTTime12, getISTDetails } from '../../utils/sessionUtils';
 
 export const StudentRequestsPage: React.FC = () => {
   const { allUsers } = useAuth();
@@ -28,836 +31,486 @@ export const StudentRequestsPage: React.FC = () => {
     borrowings,
     fines,
     systemDate,
-    settings,
-    approveRequest,
+    sessionInfo,
+    markRequestAsTaken,
     rejectRequest,
-    confirmIssueBook,
     addToast,
   } = useLibrary();
 
-  // Search by Roll Number State (Section 7)
-  const [rollNumberQuery, setRollNumberQuery] = useState('');
-  const [searchedRollNumber, setSearchedRollNumber] = useState('');
-
-  // All Requests Filters (Section 8)
-  const [statusFilter, setStatusFilter] = useState<'All' | 'Pending' | 'Approved' | 'Rejected' | 'Issued'>('All');
-  const [tableRollSearch, setTableRollSearch] = useState('');
-  const [tableTitleSearch, setTableTitleSearch] = useState('');
+  // Advanced Request Filters (CHANGE 6)
+  const [sessionFilter, setSessionFilter] = useState<'All' | 'Morning' | 'Afternoon'>('All');
+  const [statusFilter, setStatusFilter] = useState<string>('All');
+  const [deptFilter, setDeptFilter] = useState('All');
+  const [bookFilter, setBookFilter] = useState('All');
+  const [dateFilter, setDateFilter] = useState<'All' | 'Today' | 'Past7Days'>('All');
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Modals state
   const [rejectModalReq, setRejectModalReq] = useState<BookRequest | null>(null);
-  const [rejectionReason, setRejectionReason] = useState('All shelf copies currently reserved for academic syllabus.');
-
-  // Book Issue Modal State (Section 10)
-  const [issueModalRequest, setIssueModalRequest] = useState<BookRequest | null>(null);
-  const [issuingSubmitting, setIssuingSubmitting] = useState(false);
-
-  // Request Details Modal
+  const [rejectionReason, setRejectionReason] = useState('Shelf copies currently allocated or syllabus reserve in effect.');
   const [detailsModalReq, setDetailsModalReq] = useState<BookRequest | null>(null);
 
-  // Find student info for searched Roll Number
-  const studentInfo = useMemo(() => {
-    if (!searchedRollNumber.trim()) return null;
-    const cleanRoll = searchedRollNumber.trim().toLowerCase();
+  const ist = getISTDetails(systemDate);
+  const todayIST = ist.dateStr;
 
-    // First check registered student users
-    const matchedUser = allUsers.find(
-      u => u.studentId && u.studentId.toLowerCase() === cleanRoll
-    );
+  const departments = ['All', 'CSE', 'AIML', 'ECE', 'EEE', 'MECH', 'CIVIL', 'MBA'];
 
-    // Also check requests to find student details
-    const studentRequests = requests.filter(
-      r => r.studentId && r.studentId.toLowerCase() === cleanRoll
-    );
+  // Filtered requests list
+  const filteredRequests = useMemo(() => {
+    return requests.filter(r => {
+      const q = searchQuery.toLowerCase().trim();
+      const matchSearch =
+        !q ||
+        r.bookTitle.toLowerCase().includes(q) ||
+        r.studentName.toLowerCase().includes(q) ||
+        r.studentId.toLowerCase().includes(q) ||
+        r.requestId.toLowerCase().includes(q);
 
-    if (!matchedUser && studentRequests.length === 0) {
-      return null;
-    }
+      // Session filter: Morning, Afternoon, All
+      const matchSession = sessionFilter === 'All' || (r.session || 'Morning') === sessionFilter;
 
-    const firstReq = studentRequests[0];
-    const name = matchedUser ? matchedUser.name : (firstReq?.studentName || 'Student');
-    const department = matchedUser ? matchedUser.department : (firstReq?.department || 'CSE');
-    const year = matchedUser?.year || 'IV Year';
-    const email = matchedUser ? matchedUser.email : (firstReq?.studentEmail || '');
-    const phone = matchedUser?.phone || '+91 94401 23456';
-    const rollNo = matchedUser?.studentId || firstReq?.studentId || searchedRollNumber.trim().toUpperCase();
+      // Status filter
+      let matchStatus = true;
+      if (statusFilter !== 'All') {
+        if (statusFilter === 'Granted') matchStatus = r.status === 'Granted' || r.status === 'Approved';
+        else if (statusFilter === 'Taken') matchStatus = r.status === 'Taken' || r.status === 'Issued';
+        else if (statusFilter === 'Declined') matchStatus = r.status === 'Declined' || r.status === 'Rejected';
+        else matchStatus = r.status === statusFilter;
+      }
 
-    // Check outstanding fines
-    const studentFines = fines.filter(
-      f => f.studentId.toLowerCase() === cleanRoll && f.status === 'pending'
-    );
-    const outstandingFine = studentFines.reduce((sum, f) => sum + f.amount, 0);
+      // Department filter
+      const matchDept = deptFilter === 'All' || (r.department || 'CSE') === deptFilter;
 
-    return {
-      rollNo,
-      name,
-      department,
-      year,
-      email,
-      phone,
-      outstandingFine,
-      requests: studentRequests,
-    };
-  }, [searchedRollNumber, allUsers, requests, fines]);
+      // Book filter
+      const matchBook = bookFilter === 'All' || r.bookId === bookFilter;
 
-  // Handle Search Submission
-  const handleRollSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!rollNumberQuery.trim()) {
-      addToast('Input Required', 'Please enter a student roll number to search.', 'info');
-      return;
-    }
-    setSearchedRollNumber(rollNumberQuery.trim());
-  };
+      // Date filter
+      let matchDate = true;
+      const reqDate = r.sessionDate || (r.requestDate ? getISTDetails(new Date(r.requestDate)).dateStr : todayIST);
+      if (dateFilter === 'Today') {
+        matchDate = reqDate === todayIST;
+      } else if (dateFilter === 'Past7Days') {
+        const diffDays = Math.floor((systemDate.getTime() - new Date(r.requestDate).getTime()) / (1000 * 60 * 60 * 24));
+        matchDate = diffDays <= 7 && diffDays >= 0;
+      }
 
-  // Rejection handler
+      return matchSearch && matchSession && matchStatus && matchDept && matchBook && matchDate;
+    });
+  }, [requests, searchQuery, sessionFilter, statusFilter, deptFilter, bookFilter, dateFilter, systemDate, todayIST]);
+
   const handleConfirmReject = () => {
     if (!rejectModalReq) return;
-    rejectRequest(rejectModalReq.id || rejectModalReq.requestId, rejectionReason);
+    rejectRequest(rejectModalReq.id, rejectionReason);
     setRejectModalReq(null);
   };
 
-  // Issue Book handler (Section 10)
-  const handleConfirmIssue = () => {
-    if (!issueModalRequest) return;
-    setIssuingSubmitting(true);
-    setTimeout(() => {
-      const res = confirmIssueBook(issueModalRequest.requestId);
-      setIssuingSubmitting(false);
-      setIssueModalRequest(null);
-      if (res.success) {
-        addToast(
-          'Book Issued Successfully',
-          `Book "${issueModalRequest.bookTitle}" has been issued to student ${issueModalRequest.studentName} (${issueModalRequest.studentId}).`,
-          'success'
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'Granted':
+      case 'Approved':
+        return (
+          <span className="bg-emerald-100 text-emerald-800 text-xs px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1">
+            <CheckCircle2 className="w-3.5 h-3.5" /> GRANTED
+          </span>
         );
-      }
-    }, 400);
+      case 'Waitlisted':
+        return (
+          <span className="bg-amber-100 text-amber-900 text-xs px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1">
+            <Clock className="w-3.5 h-3.5" /> WAITLISTED
+          </span>
+        );
+      case 'Taken':
+      case 'Issued':
+        return (
+          <span className="bg-blue-100 text-blue-900 text-xs px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1">
+            <BookmarkCheck className="w-3.5 h-3.5" /> TAKEN
+          </span>
+        );
+      case 'Expired':
+        return (
+          <span className="bg-rose-100 text-rose-800 text-xs px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1">
+            <XCircle className="w-3.5 h-3.5" /> EXPIRED
+          </span>
+        );
+      case 'Declined':
+      case 'Rejected':
+        return (
+          <span className="bg-slate-100 text-slate-700 text-xs px-2.5 py-0.5 rounded-full font-medium flex items-center gap-1">
+            <XCircle className="w-3.5 h-3.5 text-slate-400" /> DECLINED
+          </span>
+        );
+      default:
+        return (
+          <span className="bg-slate-100 text-slate-700 text-xs px-2.5 py-0.5 rounded-full font-medium">
+            {status}
+          </span>
+        );
+    }
   };
 
-  // Filtered requests for the complete table (Section 8)
-  const allFilteredRequests = useMemo(() => {
-    return requests.filter(r => {
-      const matchStatus = statusFilter === 'All' || r.status === statusFilter;
-      const matchRoll =
-        !tableRollSearch.trim() ||
-        (r.studentId && r.studentId.toLowerCase().includes(tableRollSearch.trim().toLowerCase())) ||
-        (r.studentRollNo && r.studentRollNo.toLowerCase().includes(tableRollSearch.trim().toLowerCase()));
-      const matchTitle =
-        !tableTitleSearch.trim() ||
-        r.bookTitle.toLowerCase().includes(tableTitleSearch.trim().toLowerCase()) ||
-        r.requestId.toLowerCase().includes(tableTitleSearch.trim().toLowerCase());
-
-      return matchStatus && matchRoll && matchTitle;
-    });
-  }, [requests, statusFilter, tableRollSearch, tableTitleSearch]);
-
-  const targetBookForIssue = issueModalRequest
-    ? books.find(b => b.bookId === issueModalRequest.bookId || b.id === issueModalRequest.bookId)
-    : null;
-
-  const issueDateFormatted = systemDate.toLocaleDateString('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  });
-
-  const loanPeriodDays = targetBookForIssue?.loanPeriod || settings.loanPeriodDays || 15;
-  const calculatedDueDate = new Date(
-    systemDate.getTime() + loanPeriodDays * 24 * 60 * 60 * 1000
-  ).toLocaleDateString('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  });
-
   return (
-    <div className="space-y-8">
-      {/* Page Header */}
+    <div className="space-y-6">
+      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
             <ClipboardList className="w-7 h-7 text-blue-900" />
-            Student Book Requests & Issuance
+            Student Book Circulation Requests
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-            Review circulation requests, search by Student Roll Number, and issue books directly.
+            Filter all student requests across library sessions, review automatic FIFO grant positions, and mark books as taken.
           </p>
         </div>
 
-        <div className="flex items-center gap-3 text-xs bg-white px-3.5 py-2 rounded-xl border border-slate-200 shadow-2xs">
-          <span>
-            Pending Requests: <strong className="text-amber-600 font-bold">{requests.filter(r => r.status === 'Pending').length}</strong>
-          </span>
-          <span className="text-slate-300">|</span>
-          <span>
-            Approved (Ready to Issue): <strong className="text-blue-600 font-bold">{requests.filter(r => r.status === 'Approved').length}</strong>
-          </span>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <Link
+            to="/librarian/verify"
+            className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
+          >
+            <UserCheck className="w-4 h-4 text-emerald-300" />
+            Verify Student / Issue Book
+          </Link>
+          <Link
+            to="/librarian/queue"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold transition border border-slate-200 cursor-pointer"
+          >
+            <Clock className="w-4 h-4 text-slate-600" />
+            Session Queue (FIFO)
+          </Link>
         </div>
       </div>
 
-      {/* ============================================================ */}
-      {/* SECTION 7: PROMINENT SEARCH BY STUDENT ROLL NUMBER */}
-      {/* ============================================================ */}
-      <div className="bg-white rounded-2xl border-2 border-blue-900/20 p-6 shadow-sm space-y-5">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-              <UserCheck className="w-5 h-5 text-blue-900" />
-              Search Student Requests by Roll Number
-            </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Enter the student's Roll Number to inspect their profile and review or issue requested books.
-            </p>
-          </div>
-          <span className="hidden sm:inline-block text-[11px] bg-blue-50 text-blue-900 font-bold px-2.5 py-1 rounded-lg uppercase tracking-wider">
-            Primary Lookup
-          </span>
+      {/* Advanced Filter Console (CHANGE 6) */}
+      <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs space-y-3">
+        {/* Search */}
+        <div className="relative w-full">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search by student roll number, student name, book title, or request ID..."
+            className="w-full bg-slate-50 text-xs rounded-xl pl-10 pr-4 py-2.5 border border-slate-200 focus:bg-white focus:border-blue-600 outline-hidden transition"
+          />
         </div>
 
-        {/* Search Field */}
-        <form onSubmit={handleRollSearch} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-          <div className="relative flex-1">
-            <Search className="w-5 h-5 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={rollNumberQuery}
-              onChange={e => setRollNumberQuery(e.target.value)}
-              placeholder="Enter Student Roll Number (e.g. 246M1A0000)..."
-              className="w-full bg-slate-50 hover:bg-slate-100/60 focus:bg-white text-sm font-mono font-semibold rounded-xl pl-11 pr-4 py-3 border border-slate-300 focus:border-blue-900 focus:ring-2 focus:ring-blue-100 outline-hidden transition"
-            />
-          </div>
-          <button
-            type="submit"
-            className="px-6 py-3 bg-blue-900 hover:bg-blue-800 text-white rounded-xl text-sm font-bold shadow-xs hover:shadow transition flex items-center justify-center gap-2 cursor-pointer shrink-0"
-          >
-            <Search className="w-4 h-4" />
-            SEARCH
-          </button>
-          {searchedRollNumber && (
-            <button
-              type="button"
-              onClick={() => {
-                setSearchedRollNumber('');
-                setRollNumberQuery('');
-              }}
-              className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-semibold transition cursor-pointer"
+        {/* 5 Filter Dropdowns Grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-1 border-t border-slate-100 text-xs">
+          {/* Session */}
+          <div>
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+              Session
+            </label>
+            <select
+              value={sessionFilter}
+              onChange={e => setSessionFilter(e.target.value as any)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-700 outline-hidden cursor-pointer"
             >
-              Clear
+              <option value="All">All Sessions</option>
+              <option value="Morning">Morning Session</option>
+              <option value="Afternoon">Afternoon Session</option>
+            </select>
+          </div>
+
+          {/* Status */}
+          <div>
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+              Status
+            </label>
+            <select
+              value={statusFilter}
+              onChange={e => setStatusFilter(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-700 outline-hidden cursor-pointer"
+            >
+              <option value="All">All Statuses</option>
+              <option value="Granted">Granted</option>
+              <option value="Waitlisted">Waitlisted</option>
+              <option value="Taken">Taken / Issued</option>
+              <option value="Expired">Expired</option>
+              <option value="Declined">Declined</option>
+              <option value="Cancelled">Cancelled</option>
+            </select>
+          </div>
+
+          {/* Date */}
+          <div>
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+              Request Date
+            </label>
+            <select
+              value={dateFilter}
+              onChange={e => setDateFilter(e.target.value as any)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-700 outline-hidden cursor-pointer"
+            >
+              <option value="All">All Dates</option>
+              <option value="Today">Today Only</option>
+              <option value="Past7Days">Past 7 Days</option>
+            </select>
+          </div>
+
+          {/* Department */}
+          <div>
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+              Department
+            </label>
+            <select
+              value={deptFilter}
+              onChange={e => setDeptFilter(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-700 outline-hidden cursor-pointer"
+            >
+              {departments.map(d => (
+                <option key={d} value={d}>{d === 'All' ? 'All Depts' : `${d} Dept`}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Book */}
+          <div>
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+              Book Title
+            </label>
+            <select
+              value={bookFilter}
+              onChange={e => setBookFilter(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-700 outline-hidden cursor-pointer truncate"
+            >
+              <option value="All">All Books</option>
+              {books.map(b => (
+                <option key={b.bookId} value={b.bookId}>{b.title}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Filter Summary & Reset */}
+        <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
+          <span className="text-slate-500 font-medium">
+            Showing <strong className="text-slate-900">{filteredRequests.length}</strong> of {requests.length} requests
+          </span>
+
+          {(sessionFilter !== 'All' || statusFilter !== 'All' || deptFilter !== 'All' || bookFilter !== 'All' || dateFilter !== 'All' || searchQuery) && (
+            <button
+              onClick={() => {
+                setSessionFilter('All');
+                setStatusFilter('All');
+                setDeptFilter('All');
+                setBookFilter('All');
+                setDateFilter('All');
+                setSearchQuery('');
+              }}
+              className="text-blue-900 font-bold hover:underline cursor-pointer"
+            >
+              Reset Filters
             </button>
           )}
-        </form>
-
-        {/* Search Result Display (Section 7 Specification) */}
-        {searchedRollNumber && (
-          <div className="pt-4 border-t border-slate-200 space-y-6">
-            {!studentInfo ? (
-              <div className="p-8 text-center bg-slate-50 rounded-xl border border-slate-200">
-                <AlertCircle className="w-10 h-10 text-amber-500 mx-auto mb-2" />
-                <h3 className="text-sm font-bold text-slate-900">No Student Found for Roll Number: {searchedRollNumber}</h3>
-                <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-                  No registered student profile or requests found with roll number "{searchedRollNumber}". Please check the spelling or browse the complete table below.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-5">
-                {/* Student Information Card */}
-                <div className="bg-slate-50 rounded-xl p-5 border border-slate-200">
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div>
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">
-                        Student Information
-                      </span>
-                      <h3 className="text-lg font-extrabold text-slate-900 mt-0.5">
-                        {studentInfo.name}
-                      </h3>
-                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600 mt-1.5">
-                        <span>
-                          Roll Number: <strong className="font-mono text-blue-900 font-bold">{studentInfo.rollNo}</strong>
-                        </span>
-                        <span>•</span>
-                        <span>
-                          Department: <strong>{studentInfo.department}</strong>
-                        </span>
-                        <span>•</span>
-                        <span>
-                          Year: <strong>{studentInfo.year}</strong>
-                        </span>
-                        {studentInfo.email && (
-                          <>
-                            <span>•</span>
-                            <span className="text-slate-500">{studentInfo.email}</span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-4 border-t md:border-t-0 md:border-l border-slate-200 pt-3 md:pt-0 md:pl-5">
-                      <div>
-                        <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-bold">Outstanding Fine</span>
-                        <span className={`text-base font-extrabold ${studentInfo.outstandingFine > 0 ? 'text-rose-600' : 'text-emerald-700'}`}>
-                          ₹{studentInfo.outstandingFine}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-bold">Library Requests</span>
-                        <span className="text-base font-extrabold text-blue-950">
-                          {studentInfo.requests.length} Total
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Section 10: Approved Requests Quick Action (Ready to Issue) */}
-                {studentInfo.requests.filter(r => r.status === 'Approved').length > 0 && (
-                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div>
-                        <h4 className="text-xs font-bold text-blue-950 uppercase tracking-wider flex items-center gap-1.5">
-                          <CheckCircle2 className="w-4 h-4 text-blue-600" />
-                          Approved Requests Ready to Issue to {studentInfo.name} ({studentInfo.rollNo})
-                        </h4>
-                        <p className="text-xs text-blue-800 mt-0.5">
-                          Select an approved book below to verify stock and complete the circulation loan.
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {studentInfo.requests
-                          .filter(r => r.status === 'Approved')
-                          .map((appReq, idx) => (
-                            <button
-                              key={appReq.id}
-                              onClick={() => setIssueModalRequest(appReq)}
-                              className="px-3.5 py-1.5 bg-blue-900 hover:bg-blue-800 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
-                            >
-                              <span>{idx + 1}. {appReq.bookTitle}</span>
-                              <ArrowRight className="w-3.5 h-3.5" />
-                            </button>
-                          ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* BOOK REQUESTS Table for this Student */}
-                <div>
-                  <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-                    BOOK REQUESTS ({studentInfo.requests.length})
-                  </h4>
-
-                  {studentInfo.requests.length === 0 ? (
-                    <p className="text-xs text-slate-500 italic p-4 bg-slate-50 rounded-xl border border-slate-200">
-                      No book requests submitted by this student yet.
-                    </p>
-                  ) : (
-                    <div className="overflow-x-auto rounded-xl border border-slate-200">
-                      <table className="w-full text-left text-xs">
-                        <thead className="bg-slate-100 text-slate-600 font-bold uppercase tracking-wider text-[10px] border-b border-slate-200">
-                          <tr>
-                            <th className="p-3">Request ID</th>
-                            <th className="p-3">Book</th>
-                            <th className="p-3">Date</th>
-                            <th className="p-3">Status</th>
-                            <th className="p-3 text-right">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 bg-white">
-                          {studentInfo.requests.map(req => (
-                            <tr key={req.id} className="hover:bg-slate-50 transition">
-                              <td className="p-3 font-mono font-bold text-slate-800">
-                                {req.requestId}
-                              </td>
-                              <td className="p-3">
-                                <p className="font-bold text-slate-900">{req.bookTitle}</p>
-                                <p className="text-slate-400 text-[11px] font-mono">{req.bookId}</p>
-                              </td>
-                              <td className="p-3 text-slate-600">
-                                {new Date(req.requestDate).toLocaleDateString('en-GB', {
-                                  day: 'numeric',
-                                  month: 'short',
-                                  year: 'numeric',
-                                })}
-                              </td>
-                              <td className="p-3">
-                                {req.status === 'Pending' && (
-                                  <span className="bg-amber-100 text-amber-900 text-[11px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1">
-                                    <Clock className="w-3 h-3" /> Pending
-                                  </span>
-                                )}
-                                {req.status === 'Approved' && (
-                                  <span className="bg-blue-100 text-blue-900 text-[11px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1">
-                                    <CheckCircle2 className="w-3 h-3" /> Approved
-                                  </span>
-                                )}
-                                {req.status === 'Issued' && (
-                                  <span className="bg-emerald-100 text-emerald-900 text-[11px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1">
-                                    <BookmarkCheck className="w-3 h-3" /> Issued
-                                  </span>
-                                )}
-                                {req.status === 'Rejected' && (
-                                  <span className="bg-rose-100 text-rose-900 text-[11px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1">
-                                    <XCircle className="w-3 h-3" /> Rejected
-                                  </span>
-                                )}
-                              </td>
-                              <td className="p-3 text-right">
-                                <div className="flex items-center justify-end gap-1.5">
-                                  {req.status === 'Pending' && (
-                                    <>
-                                      <button
-                                        onClick={() => approveRequest(req.id || req.requestId)}
-                                        className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition cursor-pointer"
-                                      >
-                                        Approve
-                                      </button>
-                                      <button
-                                        onClick={() => setRejectModalReq(req)}
-                                        className="px-2 py-1.5 bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 rounded-lg text-xs font-semibold transition cursor-pointer"
-                                      >
-                                        Reject
-                                      </button>
-                                    </>
-                                  )}
-
-                                  {req.status === 'Approved' && (
-                                    <button
-                                      onClick={() => setIssueModalRequest(req)}
-                                      className="px-3 py-1.5 bg-blue-900 hover:bg-blue-800 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
-                                    >
-                                      <BookOpen className="w-3.5 h-3.5" />
-                                      Issue Book
-                                    </button>
-                                  )}
-
-                                  <button
-                                    onClick={() => setDetailsModalReq(req)}
-                                    className="px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1"
-                                  >
-                                    <Eye className="w-3.5 h-3.5" />
-                                    View Details
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+        </div>
       </div>
 
-      {/* ============================================================ */}
-      {/* SECTION 8: ALL REQUESTS MANAGEMENT */}
-      {/* ============================================================ */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs space-y-4 p-5 sm:p-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h2 className="text-base font-bold text-slate-900">
-              All Circulation Requests
-            </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Filter by status or look up any request across the entire institution.
-            </p>
-          </div>
-
-          {/* Filter Status Tabs */}
-          <div className="flex overflow-x-auto gap-1 pb-1 sm:pb-0">
-            {(['All', 'Pending', 'Approved', 'Issued', 'Rejected'] as const).map(st => {
-              const count = st === 'All' ? requests.length : requests.filter(r => r.status === st).length;
-              return (
-                <button
-                  key={st}
-                  onClick={() => setStatusFilter(st)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
-                    statusFilter === st
-                      ? 'bg-blue-900 text-white shadow-2xs'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                  }`}
-                >
-                  {st} ({count})
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Dual Search Fields (Section 8: Roll Number primary, Book Title secondary) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-          <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={tableRollSearch}
-              onChange={e => setTableRollSearch(e.target.value)}
-              placeholder="Search by Roll Number (e.g. 246M1A0000)..."
-              className="w-full bg-slate-50 text-xs rounded-xl pl-9 pr-3 py-2.5 border border-slate-200 focus:bg-white focus:border-blue-900 outline-hidden font-mono"
-            />
-          </div>
-
-          <div className="relative">
-            <BookOpen className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={tableTitleSearch}
-              onChange={e => setTableTitleSearch(e.target.value)}
-              placeholder="Search by Book Title or Request ID..."
-              className="w-full bg-slate-50 text-xs rounded-xl pl-9 pr-3 py-2.5 border border-slate-200 focus:bg-white focus:border-blue-900 outline-hidden"
-            />
-          </div>
-        </div>
-
-        {/* Requests Table */}
-        <div className="overflow-x-auto rounded-xl border border-slate-200">
+      {/* Requests Table */}
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
+        <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 text-slate-600 font-bold uppercase tracking-wider text-[10px] border-b border-slate-200">
+            <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider text-[10px] border-b border-slate-200">
               <tr>
-                <th className="p-3.5">Request ID</th>
-                <th className="p-3.5">Roll Number</th>
-                <th className="p-3.5">Student Name</th>
-                <th className="p-3.5">Book Title</th>
-                <th className="p-3.5">Request Date</th>
-                <th className="p-3.5">Status</th>
-                <th className="p-3.5 text-right">Actions</th>
+                <th className="p-4">Request ID</th>
+                <th className="p-4">Student</th>
+                <th className="p-4">Roll Number</th>
+                <th className="p-4">Book Title</th>
+                <th className="p-4 text-center">Session</th>
+                <th className="p-4 text-center">FIFO Pos</th>
+                <th className="p-4">Requested</th>
+                <th className="p-4">Status</th>
+                <th className="p-4 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 bg-white">
-              {allFilteredRequests.length === 0 ? (
+            <tbody className="divide-y divide-slate-100">
+              {requests.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-slate-400">
-                    No requests found matching the current search and filter criteria.
+                  <td colSpan={9} className="p-12 text-center text-slate-400">
+                    <ClipboardList className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                    <p className="font-bold text-slate-700 text-sm">No requests in queue</p>
+                    <p className="text-xs text-slate-400 mt-0.5">Student book requests will appear here during active library sessions.</p>
+                  </td>
+                </tr>
+              ) : filteredRequests.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="p-8 text-center text-slate-400">
+                    No requests match your filter selection.
                   </td>
                 </tr>
               ) : (
-                allFilteredRequests.map(req => (
-                  <tr key={req.id} className="hover:bg-slate-50 transition">
-                    <td className="p-3.5 font-mono font-bold text-slate-800">
-                      {req.requestId}
-                    </td>
+                filteredRequests.map(req => {
+                  const reqTime = req.requestCreatedAt ? formatISTTime12(req.requestCreatedAt) : formatISTTime12(req.requestDate);
+                  const isGranted = req.status === 'Granted' || req.status === 'Approved';
 
-                    <td className="p-3.5">
-                      <span className="font-mono font-bold text-blue-900 bg-blue-50 px-2 py-0.5 rounded">
-                        {req.studentId || req.studentRollNo || '—'}
-                      </span>
-                    </td>
+                  return (
+                    <tr key={req.id} className="hover:bg-slate-50 transition">
+                      <td className="p-4 font-mono font-bold text-slate-700">
+                        {req.requestId}
+                      </td>
 
-                    <td className="p-3.5">
-                      <p className="font-bold text-slate-900">{req.studentName}</p>
-                      <p className="text-slate-400 text-[10px]">{req.department || req.studentDept || 'CSE'}</p>
-                    </td>
+                      <td className="p-4">
+                        <div className="font-semibold text-slate-900">{req.studentName}</div>
+                        <span className="text-[10px] text-slate-400">{req.department || 'CSE'}</span>
+                      </td>
 
-                    <td className="p-3.5 max-w-xs">
-                      <p className="font-semibold text-slate-900 truncate">{req.bookTitle}</p>
-                      <p className="text-slate-400 text-[11px] font-mono">{req.bookId}</p>
-                    </td>
-
-                    <td className="p-3.5 text-slate-600">
-                      {new Date(req.requestDate).toLocaleDateString('en-GB', {
-                        day: 'numeric',
-                        month: 'short',
-                        year: 'numeric',
-                      })}
-                    </td>
-
-                    <td className="p-3.5">
-                      {req.status === 'Pending' && (
-                        <span className="bg-amber-100 text-amber-900 text-[11px] font-bold px-2.5 py-0.5 rounded-full inline-flex items-center gap-1">
-                          <Clock className="w-3 h-3" /> Pending
+                      <td className="p-4">
+                        <span className="font-mono text-blue-900 bg-blue-50 px-2 py-0.5 rounded font-bold text-xs">
+                          {req.studentId}
                         </span>
-                      )}
-                      {req.status === 'Approved' && (
-                        <span className="bg-blue-100 text-blue-900 text-[11px] font-bold px-2.5 py-0.5 rounded-full inline-flex items-center gap-1">
-                          <CheckCircle2 className="w-3 h-3" /> Approved
-                        </span>
-                      )}
-                      {req.status === 'Issued' && (
-                        <span className="bg-emerald-100 text-emerald-900 text-[11px] font-bold px-2.5 py-0.5 rounded-full inline-flex items-center gap-1">
-                          <BookmarkCheck className="w-3 h-3" /> Issued
-                        </span>
-                      )}
-                      {req.status === 'Rejected' && (
-                        <span className="bg-rose-100 text-rose-900 text-[11px] font-bold px-2.5 py-0.5 rounded-full inline-flex items-center gap-1">
-                          <XCircle className="w-3 h-3" /> Rejected
-                        </span>
-                      )}
-                    </td>
+                      </td>
 
-                    <td className="p-3.5 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        {req.status === 'Pending' && (
-                          <>
+                      <td className="p-4 font-semibold text-slate-800">
+                        {req.bookTitle}
+                      </td>
+
+                      <td className="p-4 text-center">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          req.session === 'Morning' ? 'bg-amber-50 text-amber-800' : 'bg-indigo-50 text-indigo-800'
+                        }`}>
+                          {req.session || 'Morning'}
+                        </span>
+                      </td>
+
+                      <td className="p-4 text-center">
+                        <span className="font-mono font-bold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">
+                          #{req.fifoPosition || 1}
+                        </span>
+                      </td>
+
+                      <td className="p-4 text-slate-600 font-mono">
+                        {reqTime}
+                      </td>
+
+                      <td className="p-4">
+                        {getStatusBadge(req.status)}
+                      </td>
+
+                      {/* Actions */}
+                      <td className="p-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {isGranted && (
                             <button
-                              onClick={() => approveRequest(req.id || req.requestId)}
-                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition cursor-pointer"
+                              type="button"
+                              onClick={() => markRequestAsTaken(req.id)}
+                              className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition shadow-xs cursor-pointer inline-flex items-center gap-1"
                             >
-                              Approve
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              MARK TAKEN
                             </button>
+                          )}
+
+                          {req.status === 'Requested' && (
                             <button
+                              type="button"
                               onClick={() => setRejectModalReq(req)}
-                              className="px-2 py-1 bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 rounded-lg text-xs font-semibold transition cursor-pointer"
+                              className="px-2 py-1 text-rose-600 hover:bg-rose-50 rounded-lg text-xs font-bold transition cursor-pointer"
                             >
-                              Reject
+                              Decline
                             </button>
-                          </>
-                        )}
+                          )}
 
-                        {req.status === 'Approved' && (
                           <button
-                            onClick={() => setIssueModalRequest(req)}
-                            className="px-2.5 py-1 bg-blue-900 hover:bg-blue-800 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                            type="button"
+                            onClick={() => setDetailsModalReq(req)}
+                            className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition cursor-pointer"
+                            title="View request details"
                           >
-                            <BookOpen className="w-3.5 h-3.5" />
-                            Issue Book
+                            <Eye className="w-4 h-4" />
                           </button>
-                        )}
-
-                        <button
-                          onClick={() => setDetailsModalReq(req)}
-                          className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                          Details
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* ============================================================ */}
-      {/* SECTION 10: BOOK ISSUE MODAL (EXACT SPECIFICATION) */}
-      {/* ============================================================ */}
-      {issueModalRequest && (
-        <Modal
-          isOpen={!!issueModalRequest}
-          onClose={() => setIssueModalRequest(null)}
-          title="BOOK ISSUE"
-          subtitle="Circulation Loan Issuance Confirmation"
-        >
-          <div className="space-y-4 text-xs">
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
-              <div className="flex justify-between items-center pb-2 border-b border-slate-200">
-                <span className="text-slate-500 font-medium">Student:</span>
-                <strong className="text-slate-900 text-sm">{issueModalRequest.studentName}</strong>
-              </div>
-
-              <div className="flex justify-between items-center pb-2 border-b border-slate-200">
-                <span className="text-slate-500 font-medium">Roll Number:</span>
-                <strong className="font-mono text-blue-900 text-sm font-bold bg-blue-50 px-2 py-0.5 rounded">
-                  {issueModalRequest.studentId || issueModalRequest.studentRollNo}
-                </strong>
-              </div>
-
-              <div className="flex justify-between items-center pb-2 border-b border-slate-200">
-                <span className="text-slate-500 font-medium">Book:</span>
-                <strong className="text-slate-900 text-sm text-right">{issueModalRequest.bookTitle}</strong>
-              </div>
-
-              <div className="flex justify-between items-center pb-2 border-b border-slate-200">
-                <span className="text-slate-500 font-medium">Book ID:</span>
-                <strong className="font-mono text-slate-800">{issueModalRequest.bookId}</strong>
-              </div>
-
-              <div className="flex justify-between items-center pb-2 border-b border-slate-200">
-                <span className="text-slate-500 font-medium">Issue Date:</span>
-                <strong className="text-slate-900">{issueDateFormatted}</strong>
-              </div>
-
-              <div className="flex justify-between items-center pb-2 border-b border-slate-200">
-                <span className="text-slate-500 font-medium">Loan Period:</span>
-                <strong className="text-blue-900 font-bold">{loanPeriodDays} Days</strong>
-              </div>
-
-              <div className="flex justify-between items-center pt-1">
-                <span className="text-slate-700 font-bold">Due Date:</span>
-                <strong className="text-emerald-700 font-extrabold text-sm">{calculatedDueDate}</strong>
-              </div>
-            </div>
-
-            {targetBookForIssue && (
-              <div className="text-[11px] text-slate-500 flex items-center justify-between px-1">
-                <span>Available Copies: <strong>{targetBookForIssue.availableCopies}</strong></span>
-                <span>Shelf: <strong>{targetBookForIssue.shelfNumber || 'Main Stack'}</strong></span>
-              </div>
-            )}
-
-            <div className="flex items-center gap-3 pt-3 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setIssueModalRequest(null)}
-                className="flex-1 py-2.5 rounded-xl border border-slate-200 font-bold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmIssue}
-                disabled={issuingSubmitting || (targetBookForIssue?.availableCopies ?? 1) <= 0}
-                className="flex-1 py-2.5 rounded-xl bg-blue-900 hover:bg-blue-800 text-white font-bold transition shadow-xs cursor-pointer disabled:opacity-60"
-              >
-                {issuingSubmitting ? 'Issuing Book...' : 'CONFIRM BOOK ISSUE'}
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {/* ============================================================ */}
-      {/* REQUEST DETAILS MODAL (SECTION 6) */}
-      {/* ============================================================ */}
-      {detailsModalReq && (
-        <Modal
-          isOpen={!!detailsModalReq}
-          onClose={() => setDetailsModalReq(null)}
-          title="Book Request Record"
-          subtitle={`Request ID: ${detailsModalReq.requestId}`}
-        >
-          <div className="space-y-3 text-xs">
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2.5">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Request ID:</span>
-                <strong className="font-mono text-slate-900">{detailsModalReq.requestId}</strong>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Student Roll Number:</span>
-                <strong className="font-mono text-blue-900">{detailsModalReq.studentId || detailsModalReq.studentRollNo}</strong>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Student Name:</span>
-                <strong className="text-slate-900">{detailsModalReq.studentName}</strong>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Department:</span>
-                <strong className="text-slate-900">{detailsModalReq.department || detailsModalReq.studentDept || 'CSE'}</strong>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Book ID:</span>
-                <strong className="font-mono text-slate-900">{detailsModalReq.bookId}</strong>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Book Title:</span>
-                <strong className="text-slate-900">{detailsModalReq.bookTitle}</strong>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Request Date:</span>
-                <strong className="text-slate-900">
-                  {new Date(detailsModalReq.requestDate).toLocaleDateString('en-GB', {
-                    day: 'numeric',
-                    month: 'short',
-                    year: 'numeric',
-                  })}
-                </strong>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Status:</span>
-                <span className="font-bold text-blue-900">{detailsModalReq.status}</span>
-              </div>
-              {detailsModalReq.approvedAt && (
-                <div className="flex justify-between text-emerald-700">
-                  <span>Approved Date:</span>
-                  <strong>
-                    {new Date(detailsModalReq.approvedAt).toLocaleDateString('en-GB', {
-                      day: 'numeric',
-                      month: 'short',
-                      year: 'numeric',
-                    })}
-                  </strong>
-                </div>
-              )}
-              {detailsModalReq.rejectedAt && (
-                <div className="flex justify-between text-rose-700">
-                  <span>Rejected Date:</span>
-                  <strong>
-                    {new Date(detailsModalReq.rejectedAt).toLocaleDateString('en-GB', {
-                      day: 'numeric',
-                      month: 'short',
-                      year: 'numeric',
-                    })}
-                  </strong>
-                </div>
-              )}
-              {detailsModalReq.rejectionReason && (
-                <div className="pt-2 border-t border-slate-200">
-                  <span className="text-slate-500 block mb-0.5">Rejection Reason:</span>
-                  <p className="text-rose-700 bg-rose-50 p-2 rounded-lg border border-rose-200">
-                    {detailsModalReq.rejectionReason}
-                  </p>
-                </div>
-              )}
-            </div>
-
-            <div className="pt-2">
-              <button
-                type="button"
-                onClick={() => setDetailsModalReq(null)}
-                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold transition cursor-pointer"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {/* Reject Modal */}
+      {/* Decline Modal */}
       {rejectModalReq && (
         <Modal
           isOpen={!!rejectModalReq}
           onClose={() => setRejectModalReq(null)}
-          title="Reject Book Request"
-          subtitle={`Student: ${rejectModalReq.studentName} (${rejectModalReq.studentId})`}
+          title="Decline Book Request"
+          subtitle={`Request ID: ${rejectModalReq.requestId}`}
         >
           <div className="space-y-4 text-xs">
             <p className="text-slate-600">
-              Please specify the reason for declining this request. The student will receive an instant notification.
+              Please enter the reason for declining this request for student <strong>{rejectModalReq.studentName}</strong> (Roll No: {rejectModalReq.studentId}):
             </p>
+
             <textarea
               rows={3}
               value={rejectionReason}
               onChange={e => setRejectionReason(e.target.value)}
-              className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:border-blue-900 outline-hidden"
+              className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-hidden focus:bg-white"
             />
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setRejectionReason('All copies currently assigned to laboratory / reference reading')}
-                className="text-[11px] bg-slate-100 hover:bg-slate-200 p-1.5 rounded-lg text-slate-700 cursor-pointer"
-              >
-                Lab Reference
-              </button>
-              <button
-                type="button"
-                onClick={() => setRejectionReason('Student has exceeded allowable concurrent borrowing limit (4 books)')}
-                className="text-[11px] bg-slate-100 hover:bg-slate-200 p-1.5 rounded-lg text-slate-700 cursor-pointer"
-              >
-                Limit Exceeded
-              </button>
-            </div>
-            <div className="pt-2 flex items-center gap-3">
+
+            <div className="flex items-center gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => setRejectModalReq(null)}
-                className="flex-1 py-2.5 rounded-xl border border-slate-200 font-bold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                className="flex-1 py-2 rounded-xl border border-slate-200 font-bold text-slate-700 hover:bg-slate-50 cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleConfirmReject}
-                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold transition shadow-xs cursor-pointer"
+                className="flex-1 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold transition cursor-pointer"
               >
-                Confirm Rejection
+                Confirm Decline
               </button>
             </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Request Details Modal */}
+      {detailsModalReq && (
+        <Modal
+          isOpen={!!detailsModalReq}
+          onClose={() => setDetailsModalReq(null)}
+          title="Book Request Specification"
+          subtitle={`Request ID: ${detailsModalReq.requestId}`}
+        >
+          <div className="space-y-3 text-xs">
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+              <div className="flex justify-between items-center pb-2 border-b border-slate-200">
+                <span className="text-slate-500">Book Title:</span>
+                <strong className="text-slate-900">{detailsModalReq.bookTitle}</strong>
+              </div>
+              <div className="flex justify-between items-center pb-2 border-b border-slate-200">
+                <span className="text-slate-500">Student Name:</span>
+                <strong className="text-slate-900">{detailsModalReq.studentName}</strong>
+              </div>
+              <div className="flex justify-between items-center pb-2 border-b border-slate-200">
+                <span className="text-slate-500">Student Roll Number:</span>
+                <strong className="font-mono text-blue-900 bg-blue-50 px-2 py-0.5 rounded">{detailsModalReq.studentId}</strong>
+              </div>
+              <div className="flex justify-between items-center pb-2 border-b border-slate-200">
+                <span className="text-slate-500">Session & FIFO:</span>
+                <strong className="text-slate-900">{detailsModalReq.session || 'Morning'} Session • Position #{detailsModalReq.fifoPosition || 1}</strong>
+              </div>
+              <div className="flex justify-between items-center pb-2 border-b border-slate-200">
+                <span className="text-slate-500">Status:</span>
+                <div>{getStatusBadge(detailsModalReq.status)}</div>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500">Pickup Deadline:</span>
+                <strong className="text-rose-700">{detailsModalReq.pickupDeadline || 'Session End (12:30 PM / 4:30 PM)'}</strong>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setDetailsModalReq(null)}
+              className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl transition"
+            >
+              Close
+            </button>
           </div>
         </Modal>
       )}

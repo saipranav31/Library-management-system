@@ -24,7 +24,8 @@ export const FinesManagementPage: React.FC = () => {
 
   // General Filter & Search
   const [searchQuery, setSearchQuery] = useState('');
-  const [filter, setFilter] = useState<'All' | 'pending' | 'paid'>('All');
+  const [filter, setFilter] = useState<'All' | 'pending' | 'paid' | 'overdue' | 'waived'>('All');
+  const [sortBy, setSortBy] = useState<'highest' | 'oldest' | 'mostOverdue' | 'newest'>('newest');
 
   // Search student calculation (Section 15 Specification)
   const studentFineDetails = useMemo(() => {
@@ -112,19 +113,37 @@ export const FinesManagementPage: React.FC = () => {
   const totalPending = pendingFines.reduce((acc, f) => acc + f.amount, 0);
   const totalCollected = paidFines.reduce((acc, f) => acc + f.amount, 0);
 
-  const displayedFines = fines.filter(f => {
-    const q = searchQuery.toLowerCase().trim();
-    const matchSearch =
-      !q ||
-      f.studentName.toLowerCase().includes(q) ||
-      f.studentId.toLowerCase().includes(q) ||
-      f.bookTitle.toLowerCase().includes(q) ||
-      (f.transactionId && f.transactionId.toLowerCase().includes(q)) ||
-      (f.fineId && f.fineId.toLowerCase().includes(q));
+  const displayedFines = useMemo(() => {
+    const list = fines.filter(f => {
+      const q = searchQuery.toLowerCase().trim();
+      const matchSearch =
+        !q ||
+        f.studentName.toLowerCase().includes(q) ||
+        f.studentId.toLowerCase().includes(q) ||
+        f.bookTitle.toLowerCase().includes(q) ||
+        (f.transactionId && f.transactionId.toLowerCase().includes(q)) ||
+        (f.fineId && f.fineId.toLowerCase().includes(q));
 
-    const matchFilter = filter === 'All' || f.status === filter;
-    return matchSearch && matchFilter;
-  });
+      let matchFilter = true;
+      if (filter === 'pending') matchFilter = f.status === 'pending';
+      else if (filter === 'paid') matchFilter = f.status === 'paid';
+      else if (filter === 'waived') matchFilter = f.status === 'waived';
+      else if (filter === 'overdue') matchFilter = (f.overdueDays || f.daysOverdue || 0) > 0;
+
+      return matchSearch && matchFilter;
+    });
+
+    return list.sort((a, b) => {
+      if (sortBy === 'highest') return b.amount - a.amount;
+      if (sortBy === 'oldest') return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      if (sortBy === 'mostOverdue') {
+        const daysA = a.overdueDays || a.daysOverdue || 0;
+        const daysB = b.overdueDays || b.daysOverdue || 0;
+        return daysB - daysA;
+      }
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+  }, [fines, searchQuery, filter, sortBy]);
 
   const handleMarkCashCleared = (fineId: string, studentName: string) => {
     payFine(fineId, 'DESK_CASH');
@@ -376,20 +395,38 @@ export const FinesManagementPage: React.FC = () => {
             />
           </div>
 
-          <div className="flex gap-1 w-full sm:w-auto">
-            {(['All', 'pending', 'paid'] as const).map(f => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition capitalize cursor-pointer ${
-                  filter === f
-                    ? 'bg-blue-900 text-white shadow-2xs'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                {f === 'pending' ? 'Unpaid Dues' : f === 'paid' ? 'Cleared' : 'All Fines'}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+            <div className="flex gap-1 overflow-x-auto">
+              {[
+                { id: 'All', label: 'All Fines' },
+                { id: 'pending', label: 'Pending Dues' },
+                { id: 'overdue', label: 'Overdue' },
+                { id: 'paid', label: 'Cleared' },
+              ].map(f => (
+                <button
+                  key={f.id}
+                  onClick={() => setFilter(f.id as any)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
+                    filter === f.id
+                      ? 'bg-blue-900 text-white shadow-2xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+
+            <select
+              value={sortBy}
+              onChange={e => setSortBy(e.target.value as any)}
+              className="text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-slate-700 outline-hidden cursor-pointer"
+            >
+              <option value="newest">Sort: Newest</option>
+              <option value="highest">Sort: Highest Fine</option>
+              <option value="mostOverdue">Sort: Most Overdue</option>
+              <option value="oldest">Sort: Oldest Fine</option>
+            </select>
           </div>
         </div>
 

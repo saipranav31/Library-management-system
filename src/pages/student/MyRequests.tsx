@@ -14,10 +14,11 @@ import {
   UserCheck,
 } from 'lucide-react';
 import { RequestStatus } from '../../types';
+import { formatISTTime12, formatISTDateTime } from '../../utils/sessionUtils';
 
 export const MyRequests: React.FC = () => {
   const { currentUser } = useAuth();
-  const { requests, cancelRequest } = useLibrary();
+  const { requests, cancelRequest, sessionInfo } = useLibrary();
 
   const [statusFilter, setStatusFilter] = useState<string>('All');
 
@@ -32,33 +33,52 @@ export const MyRequests: React.FC = () => {
 
   const filteredRequests = myRequests.filter(r => {
     if (statusFilter === 'All') return true;
+    if (statusFilter === 'Granted') return r.status === 'Granted' || r.status === 'Approved';
+    if (statusFilter === 'Taken') return r.status === 'Taken' || r.status === 'Issued';
+    if (statusFilter === 'Declined') return r.status === 'Declined' || r.status === 'Rejected';
     return r.status === statusFilter;
   });
 
   const getStatusBadge = (status: RequestStatus) => {
     switch (status) {
-      case 'Pending':
-        return (
-          <span className="bg-amber-100 text-amber-900 text-xs px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1">
-            <Clock className="w-3.5 h-3.5" /> Pending Review
-          </span>
-        );
+      case 'Granted':
       case 'Approved':
         return (
-          <span className="bg-blue-100 text-blue-900 text-xs px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1">
-            <CheckCircle2 className="w-3.5 h-3.5" /> Approved
+          <span className="bg-emerald-100 text-emerald-800 text-xs px-2.5 py-0.5 rounded-full font-black flex items-center gap-1">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> GRANTED
           </span>
         );
+      case 'Waitlisted':
+        return (
+          <span className="bg-amber-100 text-amber-900 text-xs px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1">
+            <Clock className="w-3.5 h-3.5 text-amber-700" /> WAITLISTED
+          </span>
+        );
+      case 'Taken':
       case 'Issued':
         return (
-          <span className="bg-emerald-100 text-emerald-900 text-xs px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1">
-            <BookmarkCheck className="w-3.5 h-3.5" /> Issued
+          <span className="bg-blue-100 text-blue-900 text-xs px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1">
+            <BookmarkCheck className="w-3.5 h-3.5 text-blue-700" /> TAKEN / ISSUED
           </span>
         );
+      case 'Expired':
+        return (
+          <span className="bg-slate-200 text-slate-700 text-xs px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1">
+            <Clock className="w-3.5 h-3.5 text-slate-500" /> EXPIRED
+          </span>
+        );
+      case 'Declined':
       case 'Rejected':
         return (
           <span className="bg-rose-100 text-rose-900 text-xs px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1">
-            <XCircle className="w-3.5 h-3.5" /> Rejected
+            <XCircle className="w-3.5 h-3.5 text-rose-600" /> DECLINED
+          </span>
+        );
+      case 'Pending':
+      case 'Requested':
+        return (
+          <span className="bg-blue-50 text-blue-800 text-xs px-2.5 py-0.5 rounded-full font-medium flex items-center gap-1">
+            <Clock className="w-3.5 h-3.5" /> REQUESTED
           </span>
         );
       case 'Cancelled':
@@ -101,19 +121,38 @@ export const MyRequests: React.FC = () => {
 
       {/* Filter Tabs */}
       <div className="flex overflow-x-auto gap-2 pb-1 border-b border-slate-200">
-        {['All', 'Pending', 'Approved', 'Issued', 'Rejected'].map(st => (
-          <button
-            key={st}
-            onClick={() => setStatusFilter(st)}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
-              statusFilter === st
-                ? 'bg-blue-900 text-white shadow-2xs'
-                : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200/80'
-            }`}
-          >
-            {st} {st === 'All' ? `(${myRequests.length})` : `(${myRequests.filter(r => r.status === st).length})`}
-          </button>
-        ))}
+        {[
+          { id: 'All', label: 'All Requests' },
+          { id: 'Granted', label: 'Granted' },
+          { id: 'Taken', label: 'Taken / Issued' },
+          { id: 'Waitlisted', label: 'Waitlisted' },
+          { id: 'Expired', label: 'Expired' },
+          { id: 'Declined', label: 'Declined' },
+        ].map(tab => {
+          const count = tab.id === 'All'
+            ? myRequests.length
+            : tab.id === 'Granted'
+            ? myRequests.filter(r => r.status === 'Granted' || r.status === 'Approved').length
+            : tab.id === 'Taken'
+            ? myRequests.filter(r => r.status === 'Taken' || r.status === 'Issued').length
+            : tab.id === 'Declined'
+            ? myRequests.filter(r => r.status === 'Declined' || r.status === 'Rejected').length
+            : myRequests.filter(r => r.status === tab.id).length;
+
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setStatusFilter(tab.id)}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
+                statusFilter === tab.id
+                  ? 'bg-blue-900 text-white shadow-2xs'
+                  : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200/80'
+              }`}
+            >
+              {tab.label} ({count})
+            </button>
+          );
+        })}
       </div>
 
       {/* Requests List */}
@@ -167,33 +206,87 @@ export const MyRequests: React.FC = () => {
 
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 pt-1">
                     <span>
-                      Requested: <strong>{new Date(req.requestDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</strong>
+                      Session: <strong className="text-slate-800">{req.session || 'Morning'} Session</strong>
                     </span>
-                    {req.approvedAt && (
-                      <span className="text-blue-700 font-semibold">
-                        Approved: {new Date(req.approvedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    <span>
+                      Requested: <strong className="text-slate-800">{formatISTDateTime(req.requestCreatedAt || req.requestDate)}</strong>
+                    </span>
+                    {req.pickupDeadline && (req.status === 'Granted' || req.status === 'Approved') && (
+                      <span className="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded">
+                        Pickup Deadline: {req.pickupDeadline}
+                      </span>
+                    )}
+                    {req.fifoPosition && (
+                      <span className="text-blue-700 font-semibold bg-blue-50 px-2 py-0.5 rounded">
+                        FIFO Queue #{req.fifoPosition}
                       </span>
                     )}
                   </div>
 
-                  {/* Approved Collection Instructions (No QR) */}
-                  {req.status === 'Approved' && (
-                    <div className="mt-2.5 p-3 bg-blue-50/80 border border-blue-200 rounded-xl text-xs text-blue-950 flex items-start gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                  {/* GRANTED Banner (CHANGE 3 Specification) */}
+                  {(req.status === 'Granted' || req.status === 'Approved') && (
+                    <div className="mt-2.5 p-3.5 bg-emerald-50 border-2 border-emerald-300 rounded-xl text-xs text-emerald-950 space-y-1.5">
+                      <div className="flex items-center gap-1.5 font-black text-emerald-900 tracking-wide">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        YOUR BOOK REQUEST HAS BEEN GRANTED.
+                      </div>
+                      <p className="text-emerald-800 text-[11px] leading-relaxed">
+                        Your request for <strong>"{req.bookTitle}"</strong> (Book ID: <code>{req.bookId}</code>) is ready for pickup at the circulation desk for the <strong>{req.session || 'Morning'} Session</strong>.
+                      </p>
+                      <div className="pt-1 border-t border-emerald-200/80 flex flex-wrap items-center justify-between text-[11px] font-semibold text-emerald-900">
+                        <span>Pickup Deadline: <strong className="font-bold underline">{req.pickupDeadline || (req.session === 'Afternoon' ? '4:30 PM' : '12:30 PM')}</strong></span>
+                        <span>Present Roll No: <strong className="font-mono bg-white px-1.5 py-0.5 rounded border border-emerald-300">{currentUser.studentId}</strong></span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* WAITLISTED Banner */}
+                  {req.status === 'Waitlisted' && (
+                    <div className="mt-2.5 p-3 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-950 flex items-start gap-2">
+                      <Clock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                       <div>
-                        <p className="font-bold">Ready for Collection!</p>
-                        <p className="text-blue-800 text-[11px] mt-0.5">
-                          Please visit the BVC Library circulation desk and provide your Student Roll Number (<strong>{currentUser.studentId}</strong>) to receive your book.
+                        <p className="font-bold text-amber-900">Waitlisted for {req.session || 'Active'} Session (FIFO #{req.fifoPosition || 1})</p>
+                        <p className="text-amber-800 text-[11px] mt-0.5">
+                          All available shelf copies were allocated to earlier requests. You will be automatically granted if a copy becomes free in this session.
                         </p>
                       </div>
                     </div>
                   )}
 
-                  {/* Rejection notice */}
-                  {req.rejectionReason && (
-                    <div className="mt-2 p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 flex items-start gap-1.5">
+                  {/* TAKEN Banner */}
+                  {(req.status === 'Taken' || req.status === 'Issued') && (
+                    <div className="mt-2.5 p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-950 flex items-start gap-2">
+                      <BookmarkCheck className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-bold text-blue-900">Book Issued & Marked as TAKEN</p>
+                        <p className="text-blue-800 text-[11px] mt-0.5">
+                          Issued by circulation librarian. View loan duration and return due date under{' '}
+                          <Link to="/student/borrowed" className="font-bold underline hover:text-blue-950">
+                            My Borrowed Books
+                          </Link>.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* EXPIRED Banner */}
+                  {req.status === 'Expired' && (
+                    <div className="mt-2.5 p-3 bg-slate-100 border border-slate-300 rounded-xl text-xs text-slate-800 flex items-start gap-2">
+                      <Clock className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-bold text-slate-900">Request Expired</p>
+                        <p className="text-slate-600 text-[11px] mt-0.5">
+                          Your book request expired because it was not collected during the selected library session. Please create a new request during the next available session.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Rejection / Declined notice */}
+                  {(req.status === 'Declined' || req.status === 'Rejected' || req.rejectionReason) && req.status !== 'Expired' && (
+                    <div className="mt-2.5 p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 flex items-start gap-1.5">
                       <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                      <span><strong>Rejection reason:</strong> {req.rejectionReason}</span>
+                      <span><strong>Reason:</strong> {req.rejectionReason || 'Declined by library system.'}</span>
                     </div>
                   )}
                 </div>

@@ -18,17 +18,18 @@ interface AuthContextType {
   logout: () => void;
   allUsers: User[];
   updateUserProfile: (data: Partial<User>) => void;
+  updateAllUsers: (updater: (prev: User[]) => User[]) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Clear any legacy user storage if needed
+  // Clear any legacy demo user storage on initialization
   try {
-    if (typeof window !== 'undefined' && localStorage.getItem('libtrack_auth_clean_real_v2') !== 'true') {
+    if (typeof window !== 'undefined' && localStorage.getItem('libtrack_auth_clean_nodemo_v3') !== 'true') {
       localStorage.removeItem('libtrack_users');
       localStorage.removeItem('libtrack_auth_user');
-      localStorage.setItem('libtrack_auth_clean_real_v2', 'true');
+      localStorage.setItem('libtrack_auth_clean_nodemo_v3', 'true');
     }
   } catch {
     // ignore
@@ -40,7 +41,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+          // Filter out any legacy mock demo students
+          const realOnly = parsed.filter(u => u.role === 'librarian' || !u.id.startsWith('usr-student-'));
+          if (realOnly.length > 0) return realOnly;
         }
       }
     } catch {
@@ -177,6 +180,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAllUsers(prev => prev.map(u => u.id === currentUser.id ? updated : u));
   };
 
+  const updateAllUsers = (updater: (prev: User[]) => User[]) => {
+    setAllUsers(prev => {
+      const updated = updater(prev);
+      if (currentUser) {
+        const found = updated.find(u => u.id === currentUser.id);
+        if (found) setCurrentUser(found);
+      }
+      return updated;
+    });
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -186,6 +200,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         logout,
         allUsers,
         updateUserProfile,
+        updateAllUsers,
       }}
     >
       {children}

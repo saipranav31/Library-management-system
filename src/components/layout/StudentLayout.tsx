@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { Navbar } from './Navbar';
 import { Sidebar } from './Sidebar';
 import { ToastContainer } from '../common/ToastContainer';
+import { DemoTestingControl } from '../common/DemoTestingControl';
 
 export const StudentLayout: React.FC = () => {
   const { currentUser } = useAuth();
@@ -32,6 +33,7 @@ export const StudentLayout: React.FC = () => {
       </div>
 
       <ToastContainer />
+      <DemoTestingControl />
     </div>
   );
 };

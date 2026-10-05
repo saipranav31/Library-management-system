@@ -35,6 +35,8 @@ import { LostDamagedPage } from './pages/librarian/LostDamagedPage';
 import { ReportsPage } from './pages/librarian/ReportsPage';
 import { AuditLogsPage } from './pages/librarian/AuditLogsPage';
 import { SettingsPage } from './pages/librarian/SettingsPage';
+import { VerifyStudentPage } from './pages/librarian/VerifyStudentPage';
+import { SessionQueuePage } from './pages/librarian/SessionQueuePage';
 
 // Root Redirect Helper
 const RootRedirect: React.FC = () => {
@@ -78,7 +80,10 @@ export default function App() {
             <Route path="/librarian" element={<LibrarianLayout />}>
               <Route index element={<Navigate to="/librarian/dashboard" replace />} />
               <Route path="dashboard" element={<LibrarianDashboard />} />
+              <Route path="verify" element={<VerifyStudentPage />} />
+              <Route path="queue" element={<SessionQueuePage />} />
               <Route path="books" element={<BooksCatalog />} />
+              <Route path="add-book" element={<BooksCatalog autoOpenAddModal={true} />} />
               <Route path="inventory" element={<InventoryManagement />} />
               <Route path="requests" element={<StudentRequestsPage />} />
               <Route path="borrowings" element={<BorrowingRecordsPage />} />
@@ -90,7 +95,11 @@ export default function App() {
               <Route path="reports" element={<ReportsPage />} />
               <Route path="audit-logs" element={<AuditLogsPage />} />
               <Route path="settings" element={<SettingsPage />} />
-              {/* Fallback for legacy QR route */}
+              {/* Route Aliases & Fallbacks */}
+              <Route path="verify-student" element={<Navigate to="/librarian/verify" replace />} />
+              <Route path="session-queue" element={<Navigate to="/librarian/queue" replace />} />
+              <Route path="catalog" element={<Navigate to="/librarian/books" replace />} />
+              <Route path="directory" element={<Navigate to="/librarian/students" replace />} />
               <Route path="qr-scanner" element={<Navigate to="/librarian/requests" replace />} />
             </Route>
 

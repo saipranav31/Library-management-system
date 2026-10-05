@@ -19,6 +19,9 @@ import {
   ScrollText,
   Settings,
   X,
+  UserCheck,
+  Clock,
+  Plus,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -85,7 +88,21 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
 
   const librarianLinks: NavItem[] = [
     { label: 'Dashboard', path: '/librarian/dashboard', icon: LayoutDashboard },
+    {
+      label: 'Verify Student / Issue',
+      path: '/librarian/verify',
+      icon: UserCheck,
+      highlight: true,
+      badge: 'Desk',
+      badgeColor: 'bg-emerald-100 text-emerald-800',
+    },
+    {
+      label: 'Session Queue (FIFO)',
+      path: '/librarian/queue',
+      icon: Clock,
+    },
     { label: 'Books Catalog', path: '/librarian/books', icon: BookOpen },
+    { label: 'Add New Book', path: '/librarian/add-book', icon: Plus },
     { label: 'Inventory Management', path: '/librarian/inventory', icon: Boxes },
     {
       label: 'Student Requests',

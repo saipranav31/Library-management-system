@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useLibrary } from '../../context/LibraryContext';
 import { Link, useNavigate } from 'react-router-dom';
@@ -18,6 +18,13 @@ import {
   Users,
   ChevronRight,
   ExternalLink,
+  Layers,
+  UserCheck,
+  Sun,
+  Sunset,
+  Coffee,
+  AlertTriangle,
+  Zap,
 } from 'lucide-react';
 import {
   BarChart,
@@ -31,7 +38,7 @@ import {
   Pie,
   Cell,
 } from 'recharts';
-import { Modal } from '../../components/common/Modal';
+import { formatISTTime12, getISTDetails } from '../../utils/sessionUtils';
 
 export const LibrarianDashboard: React.FC = () => {
   const { currentUser } = useAuth();
@@ -41,13 +48,14 @@ export const LibrarianDashboard: React.FC = () => {
     borrowings,
     fines,
     systemDate,
-    approveRequest,
-    rejectRequest,
+    sessionInfo,
+    markRequestAsTaken,
+    settings,
   } = useLibrary();
   const navigate = useNavigate();
 
-  const [rejectModalReqId, setRejectModalReqId] = useState<string | null>(null);
-  const [rejectReason, setRejectReason] = useState('Multiple copies currently reserved for semester syllabus');
+  const ist = getISTDetails(systemDate);
+  const todayIST = ist.dateStr;
 
   // Key KPI calculations
   const totalCatalogTitles = books.length;
@@ -55,18 +63,44 @@ export const LibrarianDashboard: React.FC = () => {
   const totalAvailableCopies = books.reduce((acc, b) => acc + b.availableCopies, 0);
   const totalIssuedCopies = books.reduce((acc, b) => acc + b.issuedCopies, 0);
 
-  const pendingRequests = requests.filter(r => r.status === 'Pending');
-  const approvedRequests = requests.filter(r => r.status === 'Approved');
+  // Today's requests breakdown
+  const todayRequests = useMemo(() => {
+    return requests.filter(r => {
+      const rDate = r.sessionDate || (r.requestDate ? getISTDetails(new Date(r.requestDate)).dateStr : todayIST);
+      return rDate === todayIST;
+    });
+  }, [requests, todayIST]);
+
+  const grantedToday = todayRequests.filter(r => r.status === 'Granted' || r.status === 'Approved').length;
+  const takenToday = todayRequests.filter(r => r.status === 'Taken' || r.status === 'Issued').length;
+  const expiredToday = todayRequests.filter(r => r.status === 'Expired').length;
+  const waitlistedToday = todayRequests.filter(r => r.status === 'Waitlisted').length;
 
   const activeBorrowings = borrowings.filter(b => b.status !== 'returned');
   const overdueBorrowings = borrowings.filter(b => b.status === 'overdue');
 
   const pendingFines = fines.filter(f => f.status === 'pending');
-  const paidFines = fines.filter(f => f.status === 'paid');
   const totalPendingFineAmount = pendingFines.reduce((acc, f) => acc + f.amount, 0);
-  const totalCollectedFineAmount = paidFines.reduce((acc, f) => acc + f.amount, 0);
 
-  // Departmental Borrowing Distribution for Recharts (derived strictly from real records)
+  // Low stock books (<= threshold)
+  const lowStockBooks = books.filter(b => b.availableCopies <= settings.lowStockThreshold && b.availableCopies > 0);
+  const outOfStockBooks = books.filter(b => b.availableCopies === 0);
+
+  // Immediate Return Requests count
+  const immediateReturnBorrowings = borrowings.filter(b => b.status !== 'returned' && b.immediateReturnRequested);
+
+  // Current session pending grants (FIFO)
+  const activeSessionGrants = useMemo(() => {
+    if (!sessionInfo.isActive) return [];
+    return requests.filter(r => {
+      const isGranted = r.status === 'Granted' || r.status === 'Approved';
+      const isSameDate = r.sessionDate ? r.sessionDate === todayIST : false;
+      const isSameSession = r.session === sessionInfo.session;
+      return isGranted && isSameDate && isSameSession;
+    });
+  }, [requests, todayIST, sessionInfo.isActive, sessionInfo.session]);
+
+  // Departmental Borrowing Distribution
   const deptData = [
     { name: 'CSE', count: borrowings.filter(b => b.studentDept === 'CSE').length },
     { name: 'AIML', count: borrowings.filter(b => b.studentDept === 'AIML').length },
@@ -83,277 +117,339 @@ export const LibrarianDashboard: React.FC = () => {
     { name: 'Currently Issued', value: totalIssuedCopies, color: '#1E3A8A' },
   ];
 
-  const handleConfirmReject = () => {
-    if (!rejectModalReqId) return;
-    rejectRequest(rejectModalReqId, rejectReason);
-    setRejectModalReqId(null);
-  };
-
   return (
     <div className="space-y-6">
-      
       {/* Header Banner */}
-      <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 rounded-2xl p-6 text-white shadow-md flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 rounded-3xl p-6 text-white shadow-md flex flex-col md:flex-row md:items-center md:justify-between gap-5">
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-blue-300 font-semibold text-xs tracking-wider uppercase">
-              Circulation Management Hub
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="text-blue-300 font-bold text-xs tracking-wider uppercase">
+              Circulation Management Hub • {settings.collegeName}
             </span>
             <span className="bg-blue-800 text-blue-200 text-[10px] px-2 py-0.5 rounded-full font-mono">
-              Admin: {currentUser?.name || 'Chief Librarian'}
+              Academic Year: {settings.currentAcademicYear || '2026-2027'}
             </span>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
             Library Administration Console
           </h1>
           <p className="text-slate-300 text-xs sm:text-sm mt-1">
-            Monitor real-time circulation, review student requests by Roll Number, and issue books at the desk.
+            Session-based request evaluation, FIFO automatic allocation, counter roll-number verification, and circulation control.
           </p>
         </div>
 
         {/* Quick Action Station Buttons */}
         <div className="flex flex-wrap gap-2.5">
           <Link
-            to="/librarian/requests"
+            to="/librarian/verify"
+            className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs sm:text-sm px-4 py-2.5 rounded-xl shadow-md hover:shadow-lg transition cursor-pointer"
+          >
+            <UserCheck className="w-4 h-4" />
+            Verify Student / Issue Book
+          </Link>
+
+          <Link
+            to="/librarian/queue"
             className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs sm:text-sm px-4 py-2.5 rounded-xl shadow-xs transition"
           >
-            <ClipboardList className="w-4 h-4" />
-            Student Requests
+            <Layers className="w-4 h-4" />
+            Session Queue
           </Link>
 
           <Link
             to="/librarian/returns"
-            className="inline-flex items-center gap-2 bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs sm:text-sm px-4 py-2.5 rounded-xl shadow-xs transition"
+            className="inline-flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs sm:text-sm px-3.5 py-2.5 rounded-xl border border-slate-700 transition"
           >
             <ArrowDownLeft className="w-4 h-4" />
             Quick Return
           </Link>
+        </div>
+      </div>
+
+      {/* REQUIRED DASHBOARD CARDS: Session, Today's Requests, Overdue, Fines, Low Stock, Immediate Returns */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        
+        {/* CARD 1: Today's Active Session */}
+        <div className="bg-white rounded-2xl p-5 border-2 border-blue-900/15 shadow-xs flex flex-col justify-between hover:shadow-md transition">
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-extrabold text-blue-950 uppercase tracking-wider">
+                Today's Active Session
+              </span>
+              {sessionInfo.session === 'Morning' ? (
+                <Sun className="w-5 h-5 text-amber-500" />
+              ) : sessionInfo.session === 'Afternoon' ? (
+                <Sunset className="w-5 h-5 text-indigo-500" />
+              ) : (
+                <Coffee className="w-5 h-5 text-slate-400" />
+              )}
+            </div>
+
+            <div className="mt-3">
+              <div className="flex items-baseline gap-2">
+                <span className={`text-2xl font-black ${
+                  sessionInfo.session === 'Closed' ? 'text-slate-600' : 'text-blue-900'
+                }`}>
+                  {sessionInfo.session}
+                </span>
+                <span className="text-xs font-mono text-slate-500 font-bold">
+                  {ist.time12} IST
+                </span>
+              </div>
+              <p className="text-xs font-semibold text-slate-600 mt-1">
+                Session Time: <strong className="text-slate-900">{sessionInfo.sessionTimeLabel}</strong>
+              </p>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                {sessionInfo.nextSessionText}
+              </p>
+            </div>
+          </div>
 
           <Link
-            to="/librarian/books"
-            className="inline-flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs sm:text-sm px-3.5 py-2.5 rounded-xl border border-slate-700 transition"
+            to="/librarian/queue"
+            className="mt-4 text-xs font-bold text-blue-900 hover:underline flex items-center justify-between pt-3 border-t border-slate-100"
           >
-            <Plus className="w-4 h-4" />
-            Add Book
+            <span>Inspect Session Queue</span>
+            <ChevronRight className="w-3.5 h-3.5" />
           </Link>
         </div>
-      </div>
 
-      {/* When library is empty (Section 14) */}
-      {totalCatalogTitles === 0 && (
-        <div className="bg-white rounded-2xl p-8 border border-slate-200 shadow-xs text-center space-y-3">
-          <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-900 flex items-center justify-center mx-auto shadow-inner">
-            <BookOpen className="w-7 h-7 text-blue-600" />
-          </div>
-          <h3 className="text-lg font-bold text-slate-900">Your BVC Library catalog is empty.</h3>
-          <p className="text-xs text-slate-500 max-w-md mx-auto">
-            No books have been added to the library database yet. Add the first real textbook to begin building the catalog and enabling student circulation.
-          </p>
+        {/* CARD 2: Today's Requests (Granted, Taken, Expired, Waitlisted) */}
+        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs flex flex-col justify-between hover:shadow-md transition">
           <div>
-            <Link
-              to="/librarian/books"
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-900 hover:bg-blue-800 text-white rounded-xl text-xs font-bold shadow-xs transition"
-            >
-              <Plus className="w-4 h-4" />
-              Add First Book
-            </Link>
-          </div>
-        </div>
-      )}
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider">
+                Today's Requests
+              </span>
+              <span className="text-xs font-bold bg-slate-100 px-2 py-0.5 rounded text-slate-700">
+                {todayRequests.length} Total
+              </span>
+            </div>
 
-      {/* Primary KPI Cards Grid (Section 5 & 14 Dynamic Database Values) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        {/* Total Books */}
-        <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs hover:shadow-md transition">
-          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
-            Total Books
-          </span>
-          <div className="mt-2 text-2xl font-extrabold text-slate-900">{totalCatalogTitles}</div>
-          <span className="text-[10px] text-slate-400 font-medium">titles in system</span>
-        </div>
-
-        {/* Available Copies */}
-        <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs hover:shadow-md transition">
-          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
-            Available Copies
-          </span>
-          <div className="mt-2 text-2xl font-extrabold text-emerald-700">{totalAvailableCopies}</div>
-          <span className="text-[10px] text-slate-400 font-medium">on shelf</span>
-        </div>
-
-        {/* Issued Books */}
-        <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs hover:shadow-md transition">
-          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
-            Issued Books
-          </span>
-          <div className="mt-2 text-2xl font-extrabold text-blue-900">{totalIssuedCopies}</div>
-          <span className="text-[10px] text-slate-400 font-medium">in circulation</span>
-        </div>
-
-        {/* Pending Requests */}
-        <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs hover:shadow-md transition">
-          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
-            Pending Requests
-          </span>
-          <div className="mt-2 text-2xl font-extrabold text-amber-600">{pendingRequests.length}</div>
-          <span className="text-[10px] text-slate-400 font-medium">awaiting review</span>
-        </div>
-
-        {/* Overdue Books */}
-        <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs hover:shadow-md transition">
-          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
-            Overdue Books
-          </span>
-          <div className={`mt-2 text-2xl font-extrabold ${overdueBorrowings.length > 0 ? 'text-rose-600' : 'text-slate-900'}`}>
-            {overdueBorrowings.length}
-          </div>
-          <span className="text-[10px] text-slate-400 font-medium">beyond due date</span>
-        </div>
-
-        {/* Outstanding Fines */}
-        <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs hover:shadow-md transition">
-          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
-            Outstanding Fines
-          </span>
-          <div className={`mt-2 text-2xl font-extrabold ${totalPendingFineAmount > 0 ? 'text-rose-600' : 'text-slate-900'}`}>
-            ₹{totalPendingFineAmount}
-          </div>
-          <span className="text-[10px] text-slate-400 font-medium">@ ₹2/day policy</span>
-        </div>
-      </div>
-
-      {/* Middle Section: Pending Requests Approval Station */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-slate-100">
-          <div>
-            <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-              <ClipboardList className="w-5 h-5 text-blue-600" />
-              Incoming Student Requests ({pendingRequests.length} Pending)
-            </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Review and approve student requests. Books can be issued directly using the student's Roll Number.
-            </p>
+            <div className="grid grid-cols-2 gap-2 mt-3 text-xs">
+              <div className="p-2 bg-emerald-50 rounded-xl border border-emerald-100">
+                <span className="text-[10px] text-emerald-800 font-bold block">GRANTED</span>
+                <strong className="text-lg font-extrabold text-emerald-700">{grantedToday}</strong>
+              </div>
+              <div className="p-2 bg-blue-50 rounded-xl border border-blue-100">
+                <span className="text-[10px] text-blue-900 font-bold block">TAKEN</span>
+                <strong className="text-lg font-extrabold text-blue-900">{takenToday}</strong>
+              </div>
+              <div className="p-2 bg-amber-50 rounded-xl border border-amber-100">
+                <span className="text-[10px] text-amber-900 font-bold block">WAITLISTED</span>
+                <strong className="text-lg font-extrabold text-amber-800">{waitlistedToday}</strong>
+              </div>
+              <div className="p-2 bg-rose-50 rounded-xl border border-rose-100">
+                <span className="text-[10px] text-rose-900 font-bold block">EXPIRED</span>
+                <strong className="text-lg font-extrabold text-rose-700">{expiredToday}</strong>
+              </div>
+            </div>
           </div>
 
           <Link
             to="/librarian/requests"
-            className="text-xs font-semibold text-blue-600 hover:text-blue-800 self-start sm:self-auto"
+            className="mt-4 text-xs font-bold text-blue-900 hover:underline flex items-center justify-between pt-3 border-t border-slate-100"
           >
-            View Full Request Queue &rarr;
+            <span>All Requests History</span>
+            <ChevronRight className="w-3.5 h-3.5" />
           </Link>
         </div>
 
-        {pendingRequests.length === 0 ? (
-          <div className="py-10 text-center text-slate-500">
-            <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto mb-2 opacity-80" />
-            <p className="font-bold text-sm text-slate-800">No pending student requests!</p>
-            <p className="text-xs text-slate-500 mt-0.5">All student circulation requests have been reviewed or issued.</p>
+        {/* CARD 3: Overdue Books & Pending Fines */}
+        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs flex flex-col justify-between hover:shadow-md transition">
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider">
+                Overdue & Fines
+              </span>
+              <Coins className="w-4 h-4 text-amber-600" />
+            </div>
+
+            <div className="mt-3 space-y-2">
+              <div className="flex items-baseline justify-between">
+                <span className="text-xs text-slate-500 font-medium">Overdue Books:</span>
+                <span className={`text-xl font-extrabold ${overdueBorrowings.length > 0 ? 'text-rose-600' : 'text-slate-900'}`}>
+                  {overdueBorrowings.length}
+                </span>
+              </div>
+              <div className="flex items-baseline justify-between">
+                <span className="text-xs text-slate-500 font-medium">Pending Fines:</span>
+                <span className={`text-xl font-extrabold ${totalPendingFineAmount > 0 ? 'text-rose-600' : 'text-emerald-700'}`}>
+                  ₹{totalPendingFineAmount}
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-400">
+                Standard BVC College fine: ₹2 per day after due date.
+              </p>
+            </div>
+          </div>
+
+          <Link
+            to="/librarian/fines"
+            className="mt-4 text-xs font-bold text-blue-900 hover:underline flex items-center justify-between pt-3 border-t border-slate-100"
+          >
+            <span>Manage Fines Ledger</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </Link>
+        </div>
+
+        {/* CARD 4: Low Stock & Immediate Return Requests */}
+        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs flex flex-col justify-between hover:shadow-md transition">
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider">
+                Stock & Recalls
+              </span>
+              <AlertTriangle className="w-4 h-4 text-rose-500" />
+            </div>
+
+            <div className="mt-3 space-y-2">
+              <div className="flex items-baseline justify-between">
+                <span className="text-xs text-slate-500 font-medium">Low / Out of Stock:</span>
+                <span className="text-xl font-extrabold text-amber-700">
+                  {lowStockBooks.length + outOfStockBooks.length} titles
+                </span>
+              </div>
+              <div className="flex items-baseline justify-between">
+                <span className="text-xs text-slate-500 font-medium">Immediate Returns:</span>
+                <span className={`text-xl font-extrabold ${immediateReturnBorrowings.length > 0 ? 'text-rose-600' : 'text-slate-800'}`}>
+                  {immediateReturnBorrowings.length} active
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-400">
+                Threshold: &le; {settings.lowStockThreshold} copies triggers low stock alert.
+              </p>
+            </div>
+          </div>
+
+          <Link
+            to="/librarian/borrowings"
+            className="mt-4 text-xs font-bold text-blue-900 hover:underline flex items-center justify-between pt-3 border-t border-slate-100"
+          >
+            <span>View Active Loans & Recalls</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </Link>
+        </div>
+      </div>
+
+      {/* Counter Action Spotlight: Currently GRANTED Requests (Ready to Mark as Taken) */}
+      <div className="bg-white rounded-2xl border-2 border-emerald-500/30 p-6 shadow-xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+          <div>
+            <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+              Counter Ready: Granted Books Awaiting Pickup ({activeSessionGrants.length})
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              These books were automatically granted via FIFO for {sessionInfo.session === 'Closed' ? 'today' : `the ${sessionInfo.session} Session`}. When the student arrives, verify Roll Number and click <strong className="text-slate-900">MARK AS TAKEN</strong>.
+            </p>
+          </div>
+
+          <Link
+            to="/librarian/verify"
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5 self-start sm:self-auto cursor-pointer"
+          >
+            <UserCheck className="w-4 h-4" />
+            Open Counter Terminal
+          </Link>
+        </div>
+
+        {activeSessionGrants.length === 0 ? (
+          <div className="py-8 text-center bg-slate-50 rounded-xl border border-dashed border-slate-200">
+            <CheckCircle2 className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+            <p className="text-xs font-bold text-slate-700">No uncollected granted requests at this moment.</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">As students request books during the session, granted requests will queue here.</p>
           </div>
         ) : (
-          <div className="divide-y divide-slate-100 mt-2">
-            {pendingRequests.slice(0, 4).map(req => (
-              <div key={req.id} className="py-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div className="flex items-start gap-4">
-                  <img
-                    src={req.coverImage || 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=200'}
-                    alt={req.bookTitle}
-                    className="w-14 h-20 object-cover rounded-lg border border-slate-200 shrink-0"
-                  />
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2 mb-1">
-                      <span className="text-[11px] font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded font-bold">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {activeSessionGrants.slice(0, 4).map(req => {
+              const reqTime = req.requestCreatedAt ? formatISTTime12(req.requestCreatedAt) : formatISTTime12(req.requestDate);
+              return (
+                <div
+                  key={req.id}
+                  className="p-4 bg-emerald-50/50 rounded-xl border border-emerald-200 flex items-center justify-between gap-3"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-[10px] font-bold text-emerald-900 bg-emerald-100 px-2 py-0.5 rounded">
                         {req.requestId}
                       </span>
-                      <span className="bg-amber-100 text-amber-800 text-xs px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1">
-                        <Clock className="w-3 h-3" /> Needs Approval
+                      <span className="font-mono text-xs font-extrabold text-blue-900 bg-white px-2 py-0.5 rounded border border-blue-200">
+                        {req.studentId}
                       </span>
                     </div>
-
-                    <h3 className="text-base font-bold text-slate-900 leading-snug">
-                      {req.bookTitle}
-                    </h3>
-                    <p className="text-xs text-slate-500">Author: {req.bookAuthor}</p>
-
-                    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600">
-                      <span>Student: <strong className="text-slate-900">{req.studentName}</strong> ({req.studentId})</span>
-                      <span>Department: <strong>{req.studentDept}</strong></span>
-                      <span>Requested: {new Date(req.requestDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>
-                    </div>
+                    <h4 className="font-bold text-sm text-slate-900">{req.bookTitle}</h4>
+                    <p className="text-xs text-slate-600">
+                      Student: <strong className="text-slate-800">{req.studentName}</strong> • Requested: {reqTime}
+                    </p>
                   </div>
-                </div>
-
-                {/* Approve / Reject Controls */}
-                <div className="flex items-center gap-2 self-end md:self-center shrink-0">
-                  <button
-                    onClick={() => approveRequest(req.id)}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <CheckCircle2 className="w-4 h-4" />
-                    Approve Request
-                  </button>
 
                   <button
-                    onClick={() => setRejectModalReqId(req.id)}
-                    className="px-3 py-2 bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 rounded-xl text-xs font-bold transition cursor-pointer"
+                    onClick={() => {
+                      markRequestAsTaken(req.id);
+                    }}
+                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold transition shadow-xs cursor-pointer shrink-0"
                   >
-                    <XCircle className="w-4 h-4" />
-                    Reject
+                    MARK TAKEN
                   </button>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
 
-      {/* Visual Analytics Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Department Circulation Bar Chart */}
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
+      {/* Circulation Analytics & Department Charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Department Distribution (7 cols) */}
+        <div className="lg:col-span-7 bg-white rounded-2xl border border-slate-200 p-5 shadow-xs">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
-                <TrendingUp className="w-5 h-5 text-blue-600" />
-                Circulation by Academic Department
+              <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 text-blue-900" />
+                Active Loans by Engineering Department
               </h3>
-              <p className="text-xs text-slate-500">Volume of books actively borrowed across engineering disciplines</p>
+              <p className="text-[11px] text-slate-400">Circulation distribution across BVC branches</p>
             </div>
+            <span className="text-xs font-bold text-slate-600">{activeBorrowings.length} total active</span>
           </div>
 
-          <div className="h-64 w-full">
+          <div className="h-56">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={deptData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
-                <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#64748B' }} />
-                <YAxis tick={{ fontSize: 12, fill: '#64748B' }} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+                <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748B' }} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#64748B' }} />
                 <Tooltip
-                  contentStyle={{ backgroundColor: '#0F172A', color: '#fff', borderRadius: '12px', fontSize: '12px', border: 'none' }}
+                  contentStyle={{ backgroundColor: '#0F172A', borderRadius: '12px', color: '#fff', fontSize: '11px' }}
                 />
-                <Bar dataKey="count" fill="#1E3A8A" radius={[6, 6, 0, 0]} name="Loans Count" />
+                <Bar dataKey="count" fill="#1E3A8A" radius={[6, 6, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        {/* Physical Stock Distribution Pie */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs flex flex-col justify-between">
+        {/* Catalog Availability Stock Pie (5 cols) */}
+        <div className="lg:col-span-5 bg-white rounded-2xl border border-slate-200 p-5 shadow-xs flex flex-col justify-between">
           <div>
-            <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
-              <Boxes className="w-5 h-5 text-blue-600" />
-              Physical Stock Status
-            </h3>
-            <p className="text-xs text-slate-500 mt-0.5">Shelved vs circulated copies</p>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+                <Boxes className="w-4 h-4 text-emerald-600" />
+                Inventory Stock Balance
+              </h3>
+              <span className="text-xs font-bold text-slate-600">{totalPhysicalCopies} total copies</span>
+            </div>
+            <p className="text-[11px] text-slate-400">Physical book copies in library holding</p>
 
-            <div className="h-48 w-full mt-2">
+            <div className="h-44 flex items-center justify-center my-2">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
                     data={stockData}
                     cx="50%"
                     cy="50%"
-                    innerRadius={50}
-                    outerRadius={75}
+                    innerRadius={45}
+                    outerRadius={65}
                     paddingAngle={4}
                     dataKey="value"
                   >
@@ -362,91 +458,31 @@ export const LibrarianDashboard: React.FC = () => {
                     ))}
                   </Pie>
                   <Tooltip
-                    contentStyle={{ backgroundColor: '#0F172A', color: '#fff', borderRadius: '12px', fontSize: '12px', border: 'none' }}
+                    contentStyle={{ backgroundColor: '#0F172A', borderRadius: '12px', color: '#fff', fontSize: '11px' }}
                   />
                 </PieChart>
               </ResponsiveContainer>
             </div>
           </div>
 
-          <div className="pt-3 border-t border-slate-100 space-y-1.5 text-xs">
-            <div className="flex justify-between items-center">
-              <span className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full bg-emerald-500" />
-                <span className="text-slate-600">Available on Shelf:</span>
-              </span>
-              <strong className="text-slate-900">{totalAvailableCopies} copies</strong>
+          <div className="grid grid-cols-2 gap-2 pt-3 border-t border-slate-100 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full bg-emerald-500" />
+              <div>
+                <span className="text-[10px] text-slate-400 block font-medium">On Shelf</span>
+                <strong className="text-slate-800">{totalAvailableCopies}</strong>
+              </div>
             </div>
-            <div className="flex justify-between items-center">
-              <span className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full bg-blue-900" />
-                <span className="text-slate-600">Currently Issued:</span>
-              </span>
-              <strong className="text-slate-900">{totalIssuedCopies} copies</strong>
+            <div className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full bg-blue-900" />
+              <div>
+                <span className="text-[10px] text-slate-400 block font-medium">Issued</span>
+                <strong className="text-slate-800">{totalIssuedCopies}</strong>
+              </div>
             </div>
           </div>
         </div>
-
       </div>
-
-      {/* Rejection Reason Modal */}
-      {rejectModalReqId && (
-        <Modal
-          isOpen={!!rejectModalReqId}
-          onClose={() => setRejectModalReqId(null)}
-          title="Reject Book Request"
-          subtitle="Provide a transparent reason to notify the student"
-        >
-          <div className="space-y-4 text-xs">
-            <div>
-              <label className="block font-bold text-slate-700 uppercase tracking-wider text-[11px] mb-1">
-                Select or type rejection reason
-              </label>
-              <textarea
-                rows={3}
-                value={rejectReason}
-                onChange={e => setRejectReason(e.target.value)}
-                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 text-xs focus:bg-white focus:border-blue-600 outline-hidden"
-              />
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setRejectReason('Reserved for semester examinations')}
-                className="text-[11px] bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-lg text-slate-700"
-              >
-                Exam Reserve
-              </button>
-              <button
-                type="button"
-                onClick={() => setRejectReason('Physical copy sent for rebinding / damage repair')}
-                className="text-[11px] bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-lg text-slate-700"
-              >
-                Damage / Repair
-              </button>
-            </div>
-
-            <div className="pt-2 flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => setRejectModalReqId(null)}
-                className="flex-1 py-2.5 rounded-xl border border-slate-200 font-bold text-slate-700 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmReject}
-                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold transition shadow-xs"
-              >
-                Confirm Rejection
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
     </div>
   );
 };

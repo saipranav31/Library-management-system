@@ -12,6 +12,7 @@ import {
   Coins,
   History,
   BookOpen,
+  AlertTriangle,
 } from 'lucide-react';
 import { Borrowing } from '../../types';
 
@@ -117,6 +118,7 @@ export const MyBorrowedBooks: React.FC = () => {
 
             const canRenew =
               !isReturned &&
+              !loan.immediateReturnRequested &&
               loan.renewalCount < loan.maxRenewals &&
               loan.renewalStatus !== 'pending' &&
               !isOverdue;
@@ -124,7 +126,9 @@ export const MyBorrowedBooks: React.FC = () => {
             return (
               <div
                 key={loan.id}
-                className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs hover:shadow-md transition flex flex-col md:flex-row md:items-center justify-between gap-5"
+                className={`bg-white rounded-2xl border p-5 shadow-xs hover:shadow-md transition flex flex-col md:flex-row md:items-center justify-between gap-5 ${
+                  loan.immediateReturnRequested && !isReturned ? 'border-rose-300 ring-2 ring-rose-100 bg-rose-50/20' : 'border-slate-200'
+                }`}
               >
                 <div className="flex items-start gap-4">
                   <img
@@ -132,11 +136,16 @@ export const MyBorrowedBooks: React.FC = () => {
                     alt={loan.bookTitle}
                     className="w-16 h-22 object-cover rounded-lg border border-slate-200 shrink-0"
                   />
-                  <div className="space-y-1.5">
+                  <div className="space-y-1.5 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-[11px] font-mono text-slate-700 bg-slate-100 px-2 py-0.5 rounded font-bold">
                         Book ID: {loan.bookId}
                       </span>
+                      {loan.immediateReturnRequested && !isReturned && (
+                        <span className="bg-rose-600 text-white text-[10px] px-2.5 py-0.5 rounded-full font-black tracking-wider uppercase animate-pulse flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3" /> URGENT RECALL
+                        </span>
+                      )}
                       {isReturned ? (
                         <span className="bg-slate-100 text-slate-700 text-xs px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1">
                           <CheckCircle2 className="w-3.5 h-3.5 text-slate-500" /> Returned on {loan.returnDate ? new Date(loan.returnDate).toLocaleDateString('en-GB') : '—'}
@@ -164,6 +173,20 @@ export const MyBorrowedBooks: React.FC = () => {
                       {loan.bookTitle}
                     </h3>
                     <p className="text-xs text-slate-500">Author: {loan.bookAuthor}</p>
+
+                    {/* Immediate Return Banner (CHANGE 5) */}
+                    {loan.immediateReturnRequested && !isReturned && (
+                      <div className="p-3 bg-rose-50 border-2 border-rose-300 rounded-xl text-xs space-y-1.5 mt-2">
+                        <div className="flex items-center gap-1.5 font-extrabold text-rose-900 uppercase tracking-wide">
+                          <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                          The librarian has requested immediate return of this book.
+                        </div>
+                        <p className="text-rose-800 font-medium">
+                          <strong className="text-rose-950 font-bold">Message from Librarian:</strong>{' '}
+                          {loan.immediateReturnMessage || 'Please return this book to the library immediately because it is required by another student.'}
+                        </p>
+                      </div>
+                    )}
 
                     {/* Section 11 Specification Grid */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs text-slate-600 pt-2 border-t border-slate-100 mt-2">
@@ -204,7 +227,9 @@ export const MyBorrowedBooks: React.FC = () => {
                       className="w-full sm:w-auto px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
                     >
                       <RefreshCw className="w-3.5 h-3.5" />
-                      {loan.renewalStatus === 'pending'
+                      {loan.immediateReturnRequested
+                        ? 'Renewal Blocked: Immediate Return Requested'
+                        : loan.renewalStatus === 'pending'
                         ? 'Renewal Submitted'
                         : loan.renewalCount >= loan.maxRenewals
                         ? 'Max Renewals Reached'

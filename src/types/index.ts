@@ -1,13 +1,22 @@
 export type UserRole = 'student' | 'librarian' | 'admin';
 
+export type StudentStatus = 'Active' | 'Graduated' | 'Blocked';
+
 export interface User {
   id: string;
   name: string;
   email: string;
   role: UserRole;
-  studentId?: string; // e.g., "246M1A0582"
-  department: string;
-  year?: string;
+  studentId?: string; // Roll Number e.g. "246M1A4201"
+  rollNumber?: string;
+  department: string; // "CSE" | "AIML" | "ECE" | "EEE" | "MECH" | "CIVIL" | "MBA"
+  section?: string; // "A" | "B" | "C" | "D"
+  year?: string; // "1st Year" | "2nd Year" | "3rd Year" | "4th Year" | "Graduated"
+  yearOfStudy?: number; // 1, 2, 3, 4 (or 0 for graduated)
+  academicYear?: string; // e.g. "2026-2027"
+  promotionDate?: string;
+  expectedGraduationYear?: number;
+  status?: StudentStatus;
   phone: string;
   profileImage: string;
   createdAt: string;
@@ -15,7 +24,7 @@ export interface User {
 
 export interface Book {
   id: string;
-  bookId: string; // e.g., "BK-CSE-0001"
+  bookId: string; // e.g., "BK-CSE-001"
   isbn: string;
   title: string;
   author: string;
@@ -33,24 +42,35 @@ export interface Book {
   damagedCopies: number;
   shelfNumber: string;
   location: string;
-  loanPeriod: number; // default 15 days
+  loanPeriod?: number; // legacy alias
+  loanDurationDays: number; // default e.g. 14 days
+  minimumLoanDurationDays?: number; // e.g. 7 days
+  maximumLoanDurationDays?: number; // e.g. 28 days
   status: 'available' | 'low_stock' | 'out_of_stock' | 'archived';
   createdAt: string;
   updatedAt: string;
 }
 
+export type LibrarySession = 'Morning' | 'Afternoon';
+
 export type RequestStatus = 
-  | 'Pending' 
-  | 'Approved' 
-  | 'Rejected' 
-  | 'Issued' 
+  | 'Requested' 
+  | 'Pending'    // legacy alias for Requested
+  | 'Granted' 
+  | 'Approved'   // legacy alias for Granted
+  | 'Waitlisted' 
+  | 'Taken' 
+  | 'Issued'     // legacy alias for Taken
+  | 'Expired' 
+  | 'Declined' 
+  | 'Rejected'   // legacy alias for Declined
   | 'Returned' 
   | 'Cancelled';
 
 export interface BookRequest {
   id: string;
-  requestId: string; // e.g., "REQ-00125"
-  studentId: string; // Student Roll Number (e.g. 246M1A0000)
+  requestId: string; // e.g., "REQ-2026-00125"
+  studentId: string; // Student Roll Number (e.g. 246M1A4201)
   studentRollNo?: string;
   studentName: string;
   studentEmail: string;
@@ -60,8 +80,16 @@ export interface BookRequest {
   bookTitle: string;
   bookAuthor: string;
   coverImage?: string;
-  requestDate: string;
+  session?: LibrarySession; // 'Morning' | 'Afternoon'
+  sessionDate?: string; // YYYY-MM-DD in Asia/Kolkata
+  requestCreatedAt?: string; // ISO string
+  fifoPosition?: number; // 1, 2, 3...
   status: RequestStatus;
+  grantedAt?: string;
+  pickupDeadline?: string; // e.g. "12:30 PM" or ISO string
+  takenAt?: string;
+  expiredAt?: string;
+  requestDate: string; // ISO string (for backward compatibility)
   approvedAt?: string;
   rejectedAt?: string;
   rejectionReason?: string;
@@ -72,8 +100,8 @@ export type BorrowingStatus = 'active' | 'returned' | 'overdue' | 'issued';
 
 export interface Borrowing {
   id: string;
-  transactionId: string; // e.g., "TXN-2026-0892"
-  studentId: string;
+  transactionId: string; // e.g., "TXN-2026-1001"
+  studentId: string; // Student Roll Number
   studentName: string;
   studentEmail: string;
   studentDept?: string;
@@ -81,8 +109,10 @@ export interface Borrowing {
   bookTitle: string;
   bookAuthor: string;
   coverImage?: string;
+  requestId?: string;
   issueDate: string;
   dueDate: string;
+  loanDurationDays: number; // configured duration used for this specific borrowing
   returnDate?: string;
   status: BorrowingStatus;
   renewalCount: number;
@@ -90,19 +120,31 @@ export interface Borrowing {
   renewalStatus?: 'none' | 'pending' | 'approved' | 'rejected';
   fineAmount: number;
   finePaid?: boolean;
+  issuedBy?: string; // Librarian name / ID
+  immediateReturnRequested?: boolean;
+  immediateReturnRequestedAt?: string;
+  immediateReturnMessage?: string;
 }
 
-export type NotificationType = 'INFO' | 'WARNING' | 'SUCCESS' | 'ERROR';
+export type NotificationType = 'INFO' | 'WARNING' | 'SUCCESS' | 'ERROR' | 'URGENT';
+export type NotificationPriority = 'NORMAL' | 'HIGH' | 'URGENT';
 
 export interface AppNotification {
   id: string;
+  notificationId?: string;
   userId: string; // studentId, "all", or "librarian"
+  studentId?: string;
   title: string;
   message: string;
   type: NotificationType;
+  priority?: NotificationPriority;
   read: boolean;
+  status?: 'unread' | 'read';
   link?: string;
+  bookId?: string;
+  librarianId?: string;
   createdAt: string;
+  readAt?: string;
 }
 
 export interface Fine {
@@ -189,13 +231,21 @@ export interface LostDamagedReport {
 
 export interface AuditLog {
   id: string;
+  auditId?: string;
   timestamp: string;
+  performedAt?: string;
   userId?: string;
   userName?: string;
   userRole?: string;
   actor?: string;
+  performedBy?: string;
   action: string;
+  actionType?: string;
   entity?: string;
+  entityType?: string;
+  entityId?: string;
+  oldValue?: string;
+  newValue?: string;
   details?: string;
   description?: string;
 }
@@ -209,4 +259,11 @@ export interface LibrarySettings {
   lowStockThreshold: number;
   collegeName: string;
   libraryCode: string;
+  currentAcademicYear: string; // e.g. "2026-2027"
+  academicYearStart: string; // "June 1"
+  academicYearEnd: string; // "May 31"
+  morningSessionStart: string; // "09:30"
+  morningSessionEnd: string; // "12:30"
+  afternoonSessionStart: string; // "13:30"
+  afternoonSessionEnd: string; // "16:30"
 }

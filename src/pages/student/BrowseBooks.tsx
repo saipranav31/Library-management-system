@@ -18,10 +18,11 @@ import {
 } from 'lucide-react';
 import { Book } from '../../types';
 import { Modal } from '../../components/common/Modal';
+import { getISTDetails } from '../../utils/sessionUtils';
 
 export const BrowseBooks: React.FC = () => {
   const { currentUser } = useAuth();
-  const { books, requestBook, joinWaitlist, systemDate, settings, addToast } = useLibrary();
+  const { books, requestBook, joinWaitlist, systemDate, sessionInfo, settings, addToast } = useLibrary();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
 
@@ -184,6 +185,34 @@ export const BrowseBooks: React.FC = () => {
             Showing <strong className="text-slate-900">{filteredBooks.length}</strong> of {books.length} titles
           </div>
         )}
+      </div>
+
+      {/* Session Status Banner */}
+      <div className={`rounded-2xl p-4 border shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+        sessionInfo.isActive
+          ? 'bg-blue-50/60 border-blue-200 text-blue-950'
+          : 'bg-amber-50/70 border-amber-200 text-amber-950'
+      }`}>
+        <div className="flex items-center gap-3">
+          <div className={`w-3 h-3 rounded-full shrink-0 ${sessionInfo.isActive ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-extrabold text-sm">
+                {sessionInfo.statusText}
+              </span>
+              <span className="font-mono text-xs px-2 py-0.5 rounded-md bg-white border border-slate-200 font-bold text-slate-800">
+                {getISTDetails(systemDate).time12} IST
+              </span>
+            </div>
+            <p className="text-xs text-slate-600 mt-0.5">
+              Request Hours: <strong className="text-slate-900">Morning (9:30 AM – 12:30 PM)</strong> &bull; <strong className="text-slate-900">Afternoon (1:30 PM – 4:30 PM)</strong>
+            </p>
+          </div>
+        </div>
+
+        <div className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-slate-800 self-start sm:self-auto shadow-2xs">
+          {sessionInfo.isActive ? `Closes at ${sessionInfo.closesAtText}` : sessionInfo.nextSessionText}
+        </div>
       </div>
 
       {/* Case 1: When ZERO books have been added by the librarian */}
@@ -487,16 +516,51 @@ export const BrowseBooks: React.FC = () => {
                 <strong className="text-slate-900">{currentUser?.department}</strong>
               </div>
 
+              <div className="flex justify-between items-center pb-2 border-b border-slate-200">
+                <span className="text-slate-500 font-medium">Session:</span>
+                <span className={`font-bold px-2 py-0.5 rounded text-[11px] ${
+                  sessionInfo.session === 'Morning' ? 'bg-blue-100 text-blue-900' : sessionInfo.session === 'Afternoon' ? 'bg-indigo-100 text-indigo-900' : 'bg-rose-100 text-rose-800'
+                }`}>
+                  {sessionInfo.session} Session ({sessionInfo.sessionTimeLabel})
+                </span>
+              </div>
+
               <div className="flex justify-between items-center">
-                <span className="text-slate-500 font-medium">Request Date:</span>
-                <strong className="text-slate-900">
-                  {systemDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+                <span className="text-slate-500 font-medium">Request Time (IST):</span>
+                <strong className="text-slate-900 font-mono">
+                  {getISTDetails(systemDate).displayDate}, {getISTDetails(systemDate).time12}
                 </strong>
               </div>
             </div>
 
-            <div className="p-3 bg-blue-50/60 rounded-xl border border-blue-100 text-blue-900 text-[11px] leading-relaxed">
-              The system automatically attaches your authenticated Roll Number (<strong>{currentUser?.studentId}</strong>) to this request.
+            {!sessionInfo.isActive ? (
+              <div className="p-3.5 bg-rose-50 rounded-xl border border-rose-200 text-rose-900 text-xs leading-relaxed space-y-1">
+                <div className="font-extrabold flex items-center gap-1 text-rose-800">
+                  <Clock className="w-4 h-4 text-rose-600" />
+                  Requests Currently Closed
+                </div>
+                <p>
+                  {sessionInfo.rejectionReason || 'Library request session is currently closed.'} Requests are only accepted during:
+                </p>
+                <ul className="list-disc pl-4 text-[11px] text-rose-800">
+                  <li><strong>Morning Session:</strong> 9:30 AM to 12:30 PM</li>
+                  <li><strong>Afternoon Session:</strong> 1:30 PM to 4:30 PM</li>
+                </ul>
+              </div>
+            ) : (
+              <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-emerald-950 text-[11px] leading-relaxed space-y-1">
+                <div className="font-bold flex items-center gap-1 text-emerald-800">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                  Automatic FIFO Evaluation Active
+                </div>
+                <p>
+                  If eligible copies are available on shelf, your request will be <strong>GRANTED automatically</strong>. You must collect your book at the circulation desk before <strong>{sessionInfo.closesAtText}</strong> today. Uncollected grants expire at session close.
+                </p>
+              </div>
+            )}
+
+            <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-slate-600 text-[11px]">
+              Roll number <strong className="font-mono text-slate-900">{currentUser?.studentId}</strong> is linked automatically from your authenticated session.
             </div>
 
             <div className="flex items-center gap-3 pt-2 border-t border-slate-100">
@@ -509,11 +573,15 @@ export const BrowseBooks: React.FC = () => {
               </button>
               <button
                 type="button"
-                disabled={requestSubmitting}
+                disabled={requestSubmitting || !sessionInfo.isActive}
                 onClick={handleConfirmRequest}
-                className="flex-1 py-2.5 rounded-xl bg-blue-900 hover:bg-blue-800 text-white font-bold transition shadow-xs cursor-pointer disabled:opacity-60"
+                className="flex-1 py-2.5 rounded-xl bg-blue-900 hover:bg-blue-800 text-white font-bold transition shadow-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {requestSubmitting ? 'Submitting...' : 'CONFIRM REQUEST'}
+                {requestSubmitting
+                  ? 'Submitting...'
+                  : !sessionInfo.isActive
+                  ? 'Session Closed'
+                  : 'CONFIRM REQUEST (FIFO)'}
               </button>
             </div>
           </div>
